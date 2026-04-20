@@ -26,10 +26,10 @@ export default function ScanLandingPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold">Scan delivery</h1>
+        <h1 className="text-2xl font-semibold">Verify deliveries</h1>
         <p className="text-sm text-[color:var(--text-muted)]">
-          Pick the order that matches the goods you&apos;re receiving. You can
-          only scan active or flagged orders.
+          Pick the order matching the goods you&apos;re receiving. Open it to
+          verify each item by scanning its barcode or QR code.
         </p>
       </div>
 
@@ -37,7 +37,7 @@ export default function ScanLandingPage() {
         <div className="text-sm text-[color:var(--text-muted)]">Loading…</div>
       ) : scannable.length === 0 ? (
         <div className="card p-10 text-center text-sm text-[color:var(--text-muted)]">
-          No orders awaiting scan. Ask the PM to create one.
+          No deliveries awaiting verification. Ask the PM to create one.
         </div>
       ) : (
         <ul className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -73,7 +73,7 @@ export default function ScanLandingPage() {
                   </div>
                 </div>
                 <Link href={`/orders/${o.id}`} className="btn btn-primary">
-                  Start scanning →
+                  Verify delivery →
                 </Link>
               </li>
             );

@@ -112,11 +112,16 @@ export function ScanInput({ onScan, disabled }: ScanInputProps) {
   return (
     <div className="card overflow-hidden">
       <div className="flex items-center justify-between border-b border-[color:var(--border)] px-6 py-3">
-        <div className="text-sm font-semibold">Scan barcode</div>
+        <div>
+          <div className="text-sm font-semibold">Verify item</div>
+          <div className="text-[11px] text-[color:var(--text-muted)]">
+            Scan the barcode or QR with a camera, or type/paste it.
+          </div>
+        </div>
         <div
           className="inline-flex items-center rounded-full border border-[color:var(--border)] bg-[color:var(--surface-muted)] p-1 text-xs font-semibold"
           role="tablist"
-          aria-label="Scan mode"
+          aria-label="Input method"
         >
           <button
             role="tab"
@@ -152,12 +157,12 @@ export function ScanInput({ onScan, disabled }: ScanInputProps) {
               autoFocus
               disabled={disabled}
               className="input font-mono"
-              placeholder="Scan or type a barcode (e.g. TRT-ABC123DEF456)"
+              placeholder="Scan or enter a barcode (e.g. TRT-ABC123DEF456)"
               value={value}
               onChange={(e) => setValue(e.target.value)}
             />
             <button type="submit" className="btn btn-primary" disabled={disabled}>
-              Scan
+              Verify
             </button>
           </form>
         ) : (

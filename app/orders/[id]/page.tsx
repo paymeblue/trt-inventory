@@ -7,6 +7,7 @@ import useSWR from "@/lib/swr";
 import { useAuthedUser } from "@/components/session-context";
 import { Barcode } from "@/components/barcode";
 import { QrCode } from "@/components/qr-code";
+import { buildScanUrl } from "@/lib/scan-url";
 import { StatusPill } from "@/components/status-pill";
 import { ScanInput } from "@/components/scan-input";
 import { Tour, type TourStep } from "@/components/tour";
@@ -57,18 +58,18 @@ function fmt(ts: string | Date | null | undefined) {
 }
 
 /**
- * Full deep-link URL for a given item barcode. Printed as a QR code so a
- * phone camera scan opens the URL directly and the scan completes without
- * the installer having to type anything. Falls back to a relative URL
- * during SSR (where `window` doesn't exist) — the QR is only rendered on
- * the client so this branch is just for type safety.
+ * Convenience binding for the React tree: resolves `NEXT_PUBLIC_APP_URL`
+ * and `window.location.origin` at call-time and delegates to the pure
+ * `buildScanUrl` in `@/lib/scan-url` (covered by unit tests).
  */
-function buildScanUrl(barcode: string) {
-  const origin =
-    typeof window !== "undefined" && window.location
-      ? window.location.origin
-      : "";
-  return `${origin}/s/${encodeURIComponent(barcode)}`;
+function resolveScanUrl(barcode: string) {
+  return buildScanUrl(barcode, {
+    envOrigin: process.env.NEXT_PUBLIC_APP_URL,
+    windowOrigin:
+      typeof window !== "undefined" && window.location
+        ? window.location.origin
+        : null,
+  });
 }
 
 export default function OrderDetailPage({
@@ -537,22 +538,22 @@ function InstallerView({
     {
       selector: "[data-tour='remaining']",
       title: "Remaining items",
-      body: "This counter goes down every time a scan acknowledges an item.",
+      body: "This counter goes down every time you verify an item on the truck.",
     },
     {
       selector: "[data-tour='scan-box']",
-      title: "Scan from here",
-      body: "Use your phone camera, a handheld scanner, or paste a barcode manually.",
+      title: "Verify items here",
+      body: "Use your phone camera, a handheld scanner, or type/paste the barcode. A valid read instantly acknowledges the item and decrements warehouse stock.",
     },
     {
       selector: "[data-tour='pending']",
       title: "Pending items",
-      body: "These items are still awaiting scan. Each successful scan moves an item to the Resolved list below.",
+      body: "These items are still awaiting verification. A successful scan moves an item into Resolved.",
     },
     {
       selector: "[data-tour='resolved']",
       title: "Resolved items",
-      body: "Acknowledged deliveries live here — with who scanned them and when.",
+      body: "Verified deliveries live here — with who acknowledged them and when.",
     },
   ];
 
@@ -604,7 +605,7 @@ function InstallerView({
               <div>
                 <h2 className="text-base font-semibold">Pending</h2>
                 <p className="text-xs text-[color:var(--text-muted)]">
-                  Still awaiting scan
+                  Awaiting verification
                 </p>
               </div>
               <span className="pill pill-active">{pending.length}</span>
@@ -744,7 +745,7 @@ function TrackCards({
       ))}
       {pendingScans > 0 && (
         <div className="col-span-3 text-[11px] text-[color:var(--text-muted)]">
-          Processing {pendingScans} scan{pendingScans === 1 ? "" : "s"}…
+          Verifying {pendingScans} item{pendingScans === 1 ? "" : "s"}…
         </div>
       )}
     </div>
@@ -864,11 +865,11 @@ function ScanFeed({ entries }: { entries: FeedEntry[] }) {
   return (
     <div className="card">
       <div className="border-b border-[color:var(--border)] px-6 py-3 text-sm font-semibold">
-        Scan history
+        Verification log
       </div>
       {entries.length === 0 ? (
         <div className="px-6 py-8 text-center text-xs text-[color:var(--text-muted)]">
-          No scans yet. Scan a barcode to get started.
+          No verifications yet. Scan a barcode to begin.
         </div>
       ) : (
         <ul className="max-h-80 overflow-y-auto divide-y divide-[color:var(--border)]">
@@ -1045,7 +1046,7 @@ function ItemCard({
           <Barcode value={item.barcode} height={55} />
         </div>
         <div className="flex flex-col items-center justify-center border-l border-[color:var(--border)] pl-3">
-          <QrCode value={buildScanUrl(item.barcode)} size={88} />
+          <QrCode value={resolveScanUrl(item.barcode)} size={88} />
           <div className="mt-1 text-[9px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
             Scan with phone
           </div>

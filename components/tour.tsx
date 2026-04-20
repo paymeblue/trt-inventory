@@ -202,7 +202,7 @@ export function Tour({ steps, autoStart = true }: TourProps) {
         <div
           role="dialog"
           aria-labelledby="tour-title"
-          className="fixed z-[70] w-[320px] overflow-hidden rounded-xl border border-[color:var(--border)] bg-white shadow-xl"
+          className="fixed z-[70] w-[320px] overflow-hidden rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)] text-[color:var(--text)] shadow-xl"
           style={{
             top: tip?.top ?? 120,
             left: tip?.left ?? 120,

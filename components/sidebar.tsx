@@ -9,7 +9,7 @@ const navAll: { href: string; label: string; icon: string; roles: Role[] }[] = [
   { href: "/", label: "Dashboard", icon: "◆", roles: ["pm", "installer"] },
   { href: "/orders", label: "Orders", icon: "▤", roles: ["pm", "installer"] },
   { href: "/orders/new", label: "New Order", icon: "✚", roles: ["pm"] },
-  { href: "/scan", label: "Scan", icon: "⎚", roles: ["installer"] },
+  { href: "/scan", label: "Verify deliveries", icon: "⎚", roles: ["installer"] },
   { href: "/warehouse", label: "Warehouse", icon: "▥", roles: ["pm"] },
   { href: "/team", label: "Team", icon: "◎", roles: ["pm"] },
   { href: "/help", label: "How it works", icon: "?", roles: ["pm", "installer"] },

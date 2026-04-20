@@ -1,18 +1,83 @@
 @import "tailwindcss";
 
-:root {
-  --background: #f6f7fb;
-  --surface: #ffffff;
-  --surface-muted: #f1f3f9;
-  --border: #e4e7ee;
+/* ---------- Light tokens (default) ----------
+ * Softened from pure white: surface drops to #fbfcfe (instead of #ffffff)
+ * and background nudges a touch deeper so the card/page contrast reads
+ * without the previous glare. All downstream color refs go through
+ * var(--*) so themes just swap values, no component changes needed.
+ */
+:root,
+[data-theme="light"] {
+  --background: #eef1f6;
+  --surface: #fbfcfe;
+  --surface-muted: #eef1f7;
+  --border: #dde1ea;
   --text: #0f172a;
-  --text-muted: #64748b;
+  --text-muted: #5c6577;
   --primary: #2563eb;
   --primary-foreground: #ffffff;
   --success: #16a34a;
   --warning: #d97706;
   --danger: #dc2626;
   --info: #0ea5e9;
+
+  --pill-draft-bg: #eef2f7;
+  --pill-draft-fg: #475569;
+  --pill-active-bg: #e0f2fe;
+  --pill-active-fg: #0369a1;
+  --pill-fulfilled-bg: #dcfce7;
+  --pill-fulfilled-fg: #166534;
+  --pill-anomaly-bg: #fee2e2;
+  --pill-anomaly-fg: #991b1b;
+
+  --flash-success-bg: rgba(22, 163, 74, 0.25);
+  --flash-success-ring: rgba(22, 163, 74, 0.25);
+  --flash-error-bg: rgba(220, 38, 38, 0.18);
+  --flash-error-ring: rgba(220, 38, 38, 0.2);
+
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --spotlight-ring: rgba(37, 99, 235, 0.45);
+  --spotlight-backdrop: rgba(15, 23, 42, 0.55);
+  --input-focus-ring: rgba(37, 99, 235, 0.15);
+
+  color-scheme: light;
+}
+
+/* ---------- Dark tokens ---------- */
+[data-theme="dark"] {
+  --background: #0b1220;
+  --surface: #121a2b;
+  --surface-muted: #182136;
+  --border: #23304a;
+  --text: #e6ebf5;
+  --text-muted: #8a95ac;
+  --primary: #60a5fa;
+  --primary-foreground: #0b1220;
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --danger: #f87171;
+  --info: #38bdf8;
+
+  --pill-draft-bg: #1a2236;
+  --pill-draft-fg: #9aa5bd;
+  --pill-active-bg: #132a44;
+  --pill-active-fg: #7cc4f5;
+  --pill-fulfilled-bg: #103a23;
+  --pill-fulfilled-fg: #6ee7a1;
+  --pill-anomaly-bg: #3b1414;
+  --pill-anomaly-fg: #f3a3a3;
+
+  --flash-success-bg: rgba(74, 222, 128, 0.22);
+  --flash-success-ring: rgba(74, 222, 128, 0.35);
+  --flash-error-bg: rgba(248, 113, 113, 0.22);
+  --flash-error-ring: rgba(248, 113, 113, 0.35);
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --spotlight-ring: rgba(96, 165, 250, 0.55);
+  --spotlight-backdrop: rgba(0, 0, 0, 0.72);
+  --input-focus-ring: rgba(96, 165, 250, 0.25);
+
+  color-scheme: dark;
 }
 
 @theme inline {
@@ -46,7 +111,7 @@ body {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 14px;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  box-shadow: var(--shadow-card);
 }
 
 .pill {
@@ -61,10 +126,10 @@ body {
   text-transform: uppercase;
 }
 
-.pill-draft    { background: #eef2f7; color: #475569; }
-.pill-active   { background: #e0f2fe; color: #0369a1; }
-.pill-fulfilled{ background: #dcfce7; color: #166534; }
-.pill-anomaly  { background: #fee2e2; color: #991b1b; }
+.pill-draft     { background: var(--pill-draft-bg); color: var(--pill-draft-fg); }
+.pill-active    { background: var(--pill-active-bg); color: var(--pill-active-fg); }
+.pill-fulfilled { background: var(--pill-fulfilled-bg); color: var(--pill-fulfilled-fg); }
+.pill-anomaly   { background: var(--pill-anomaly-bg); color: var(--pill-anomaly-fg); }
 
 .btn {
   display: inline-flex;
@@ -80,11 +145,11 @@ body {
 }
 .btn:active { transform: translateY(1px); }
 .btn-primary { background: var(--primary); color: var(--primary-foreground); }
-.btn-primary:hover { background: #1d4ed8; }
+.btn-primary:hover { filter: brightness(0.92); }
 .btn-ghost { background: transparent; color: var(--text); border-color: var(--border); }
 .btn-ghost:hover { background: var(--surface-muted); }
 .btn-danger { background: var(--danger); color: #fff; }
-.btn-danger:hover { background: #b91c1c; }
+.btn-danger:hover { filter: brightness(0.9); }
 .btn[disabled] { opacity: 0.55; cursor: not-allowed; }
 
 .input {
@@ -93,24 +158,27 @@ body {
   border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--surface);
+  color: var(--text);
   font-size: 0.9rem;
   outline: none;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
+.input::placeholder { color: var(--text-muted); opacity: 0.75; }
 .input:focus {
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+  box-shadow: 0 0 0 3px var(--input-focus-ring);
 }
 
-@keyframes flashScanned {
-  0%   { background-color: rgba(22, 163, 74, 0.25); box-shadow: 0 0 0 4px rgba(22, 163, 74, 0.25); }
-  100% { background-color: transparent; box-shadow: 0 0 0 0 rgba(22, 163, 74, 0); }
+@keyframes flashVerified {
+  0%   { background-color: var(--flash-success-bg); box-shadow: 0 0 0 4px var(--flash-success-ring); }
+  100% { background-color: transparent; box-shadow: 0 0 0 0 transparent; }
 }
-.flash-scanned { animation: flashScanned 1.8s ease-out; }
+/* Keep `.flash-scanned` class name for back-compat with existing markup. */
+.flash-scanned { animation: flashVerified 1.8s ease-out; }
 
 @keyframes flashError {
-  0%   { background-color: rgba(220, 38, 38, 0.18); box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.2); }
-  100% { background-color: transparent; box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
+  0%   { background-color: var(--flash-error-bg); box-shadow: 0 0 0 4px var(--flash-error-ring); }
+  100% { background-color: transparent; box-shadow: 0 0 0 0 transparent; }
 }
 .flash-error { animation: flashError 1.6s ease-out; }
 
@@ -118,13 +186,23 @@ body {
   position: fixed;
   pointer-events: none;
   border-radius: 12px;
-  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.45), 0 0 0 9999px rgba(15, 23, 42, 0.55);
+  box-shadow: 0 0 0 4px var(--spotlight-ring), 0 0 0 9999px var(--spotlight-backdrop);
   transition: top 0.25s ease, left 0.25s ease, width 0.25s ease, height 0.25s ease;
   z-index: 60;
 }
 
+/* Print styles: always force a light palette so printed barcodes/QRs
+ * stay high-contrast regardless of the user's chosen theme. */
 @media print {
+  :root, [data-theme="dark"] {
+    --background: #ffffff;
+    --surface: #ffffff;
+    --surface-muted: #f4f4f4;
+    --border: #cccccc;
+    --text: #000000;
+    --text-muted: #444444;
+  }
   .no-print { display: none !important; }
   .card { box-shadow: none !important; border-color: #ccc !important; }
-  body { background: #fff !important; }
+  body { background: #fff !important; color: #000 !important; }
 }

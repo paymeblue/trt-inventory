@@ -66,15 +66,15 @@ export default function HelpPage() {
             A collection of items (one per SKU) shipped to a project site.
           </Def>
           <Def term="Active">
-            An order that is ready to be scanned on-site.
+            An order that is ready to be verified on-site.
           </Def>
           <Def term="Fulfilled">
-            Every item in the order has been scanned. Warehouse stock was
+            Every item in the order has been verified. Warehouse stock was
             decremented accordingly.
           </Def>
           <Def term="Anomaly">
-            The order received an invalid scan. Still scannable, but flagged
-            for review.
+            The order received an unexpected barcode. Still verifiable, but
+            flagged for review.
           </Def>
         </dl>
       </section>
@@ -118,8 +118,9 @@ function PmGuide() {
       body: (
         <>
           Hit <b>+ New Order</b>, give it a project name, and open it. Add
-          one SKU at a time — each one gets its own printable barcode. You
-          can add or remove items freely until the first scan happens.
+          one SKU at a time — each one gets its own printable barcode and
+          QR code. You can add or remove items freely until the first item
+          is verified.
         </>
       ),
     },
@@ -136,9 +137,9 @@ function PmGuide() {
       title: "Hand it off and watch it fulfill",
       body: (
         <>
-          The installer scans the labels on-site. You&apos;ll see the
+          The installer verifies each label on-site. You&apos;ll see the
           progress bar move in real time and warehouse stock auto-decrement.
-          When every item is scanned, the order flips to{" "}
+          When every item is verified, the order flips to{" "}
           <b>Fulfilled</b>.
         </>
       ),
@@ -155,7 +156,7 @@ function InstallerGuide() {
       body: <>From the login page, enter the email and password your project manager created for you.</>,
     },
     {
-      title: "Open a scannable order",
+      title: "Open a delivery awaiting verification",
       body: (
         <>
           Go to{" "}
@@ -163,21 +164,23 @@ function InstallerGuide() {
             href="/scan"
             className="text-[color:var(--primary)] underline"
           >
-            Scan
+            Verify deliveries
           </Link>{" "}
           and pick the order whose goods you&apos;re receiving. You&apos;ll
-          see every item and its barcode.
+          see every item with its barcode and QR code.
         </>
       ),
     },
     {
-      title: "Scan each barcode as items come off the truck",
+      title: "Verify each item as it comes off the truck",
       body: (
         <>
-          Use the camera (phone or laptop) or a handheld scanner. You can
-          also type the barcode manually. Valid scans turn the item green
-          and flash <b>Just scanned</b>. Duplicates and unknown codes are
-          rejected.
+          Point your phone camera at the QR code on the label — the native
+          camera app opens the URL and the item is verified immediately. No
+          login prompt, no typing. You can also use the in-app camera tab,
+          a handheld USB scanner, or type the barcode manually. Valid reads
+          turn the item green; duplicates and unknown codes are rejected
+          with a clear message.
         </>
       ),
     },
@@ -186,7 +189,8 @@ function InstallerGuide() {
       body: (
         <>
           The progress bar at the top shows how close the order is to done.
-          Warehouse stock is automatically decremented on every valid scan.
+          Warehouse stock is automatically decremented on every valid
+          verification.
         </>
       ),
     },
@@ -194,7 +198,7 @@ function InstallerGuide() {
       title: "Done — verified and recorded",
       body: (
         <>
-          Once every item is scanned the order status flips to{" "}
+          Once every item is verified the order status flips to{" "}
           <b>Fulfilled</b>. No paperwork, no phone calls.
         </>
       ),

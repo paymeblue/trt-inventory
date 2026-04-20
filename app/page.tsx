@@ -54,7 +54,7 @@ export default function DashboardPage() {
         <p className="text-sm text-[color:var(--text-muted)]">
           {user.role === "pm"
             ? "Create orders, manage the warehouse, and onboard installers."
-            : "Open an active order and scan deliveries as they arrive on site."}
+            : "Open an active order and verify deliveries as they arrive on site."}
         </p>
       </section>
 
@@ -123,7 +123,7 @@ export default function DashboardPage() {
             ) : (
               <>
                 <Link href="/scan" className="btn btn-primary">
-                  Start scanning
+                  Verify a delivery
                 </Link>
                 <Link href="/orders" className="btn btn-ghost">
                   Browse active orders
