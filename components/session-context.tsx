@@ -16,6 +16,11 @@ export interface SessionUser {
   email: string;
   role: Role;
   name: string;
+  /**
+   * ISO timestamp at which the user finished or skipped the guided tour.
+   * `null` → brand-new user who hasn't seen it yet → tour auto-opens once.
+   */
+  onboardedAt: string | null;
 }
 
 interface SessionState {
@@ -23,6 +28,12 @@ interface SessionState {
   loading: boolean;
   refresh: () => Promise<void>;
   logout: () => Promise<void>;
+  /**
+   * Persist "tour finished" server-side and update the in-memory session
+   * so it never auto-opens again for this user. Idempotent and tolerant
+   * of network errors — local state moves forward regardless.
+   */
+  markOnboarded: () => Promise<void>;
 }
 
 const SessionContext = createContext<SessionState | null>(null);
@@ -55,13 +66,24 @@ export function SessionProvider({ children, initialUser }: Props) {
     router.refresh();
   }, [router]);
 
+  const markOnboarded = useCallback(async () => {
+    setUser((u) => (u ? { ...u, onboardedAt: new Date().toISOString() } : u));
+    try {
+      await fetch("/api/me/onboarded", { method: "POST" });
+    } catch {
+      // Best-effort: we've already updated local state. If the server
+      // write failed they'll see the tour again next session, which is
+      // acceptable degradation.
+    }
+  }, []);
+
   useEffect(() => {
     setUser(initialUser);
   }, [initialUser]);
 
   const value = useMemo<SessionState>(
-    () => ({ user, loading, refresh, logout }),
-    [user, loading, refresh, logout],
+    () => ({ user, loading, refresh, logout, markOnboarded }),
+    [user, loading, refresh, logout, markOnboarded],
   );
 
   return (

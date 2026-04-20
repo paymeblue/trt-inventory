@@ -32,6 +32,14 @@ export const users = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
+    /**
+     * Timestamp at which the user finished (or skipped) the guided product
+     * tour. Null means they're a brand-new user and the tour should auto-
+     * open on their first visit to a page that wires one up. Once set,
+     * the tour never auto-opens again — they can still re-open it manually
+     * via the "? Guided tour" floating button.
+     */
+    onboardedAt: timestamp("onboarded_at", { withTimezone: true }),
   },
   (t) => [uniqueIndex("users_email_unique").on(t.email)],
 );

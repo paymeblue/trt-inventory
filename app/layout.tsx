@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { getCurrentUser } from "@/lib/auth-guard";
+import { getSessionUser } from "@/lib/session-user";
 import { SessionProvider } from "@/components/session-context";
 import { Sidebar } from "@/components/sidebar";
 import { Topbar } from "@/components/topbar";
@@ -24,14 +25,7 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const actor = await getCurrentUser();
-  const user = actor
-    ? {
-        id: actor.userId,
-        email: actor.email,
-        role: actor.role,
-        name: actor.name,
-      }
-    : null;
+  const user = actor ? await getSessionUser(actor) : null;
 
   return (
     <html

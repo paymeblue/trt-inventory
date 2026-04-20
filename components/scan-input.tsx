@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import type { IScannerControls } from "@zxing/browser";
+
+import { extractScanDeepLink } from "@/lib/scan-deep-link";
 
 interface ScanInputProps {
   onScan: (value: string) => void;
@@ -15,6 +18,7 @@ interface ScanInputProps {
  * enabled so the app is usable without camera permissions.
  */
 export function ScanInput({ onScan, disabled }: ScanInputProps) {
+  const router = useRouter();
   const [mode, setMode] = useState<"manual" | "camera">("manual");
   const [value, setValue] = useState("");
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -24,6 +28,25 @@ export function ScanInput({ onScan, disabled }: ScanInputProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const controlsRef = useRef<IScannerControls | null>(null);
   const lastScanRef = useRef<{ value: string; at: number } | null>(null);
+
+  /**
+   * Unifies what to do with a decoded payload (regardless of source):
+   *   - if it's a `/s/<barcode>` deep-link, navigate there so the auto-
+   *     complete flow kicks in;
+   *   - otherwise hand the raw barcode to the parent.
+   *
+   * Held in a ref so the ZXing callback can always see the latest version
+   * without having to restart the camera stream on every render.
+   */
+  const payloadRef = useRef<(raw: string) => void>(() => undefined);
+  payloadRef.current = (raw: string) => {
+    const deep = extractScanDeepLink(raw);
+    if (deep) {
+      router.push(deep);
+      return;
+    }
+    onScan(raw);
+  };
 
   useEffect(() => {
     if (mode !== "camera") return;
@@ -60,7 +83,7 @@ export function ScanInput({ onScan, disabled }: ScanInputProps) {
               return;
             }
             lastScanRef.current = { value: text, at: now };
-            onScan(text);
+            payloadRef.current(text);
           },
         );
         controlsRef.current = controls;
@@ -82,7 +105,7 @@ export function ScanInput({ onScan, disabled }: ScanInputProps) {
     e.preventDefault();
     const trimmed = value.trim();
     if (!trimmed) return;
-    onScan(trimmed);
+    payloadRef.current(trimmed);
     setValue("");
   }
 

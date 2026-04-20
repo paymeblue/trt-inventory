@@ -15,6 +15,13 @@
       "when": 1776714252427,
       "tag": "0001_faithful_pepper_potts",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1776718330257,
+      "tag": "0002_flashy_lady_bullseye",
+      "breakpoints": true
     }
   ]
 }

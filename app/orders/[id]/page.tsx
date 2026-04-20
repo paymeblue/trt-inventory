@@ -6,6 +6,7 @@ import Link from "next/link";
 import useSWR from "@/lib/swr";
 import { useAuthedUser } from "@/components/session-context";
 import { Barcode } from "@/components/barcode";
+import { QrCode } from "@/components/qr-code";
 import { StatusPill } from "@/components/status-pill";
 import { ScanInput } from "@/components/scan-input";
 import { Tour, type TourStep } from "@/components/tour";
@@ -53,6 +54,21 @@ type FeedEntry =
 function fmt(ts: string | Date | null | undefined) {
   if (!ts) return "—";
   return new Date(ts).toLocaleString();
+}
+
+/**
+ * Full deep-link URL for a given item barcode. Printed as a QR code so a
+ * phone camera scan opens the URL directly and the scan completes without
+ * the installer having to type anything. Falls back to a relative URL
+ * during SSR (where `window` doesn't exist) — the QR is only rendered on
+ * the client so this branch is just for type safety.
+ */
+function buildScanUrl(barcode: string) {
+  const origin =
+    typeof window !== "undefined" && window.location
+      ? window.location.origin
+      : "";
+  return `${origin}/s/${encodeURIComponent(barcode)}`;
 }
 
 export default function OrderDetailPage({
@@ -1024,8 +1040,16 @@ function ItemCard({
         </div>
       </div>
 
-      <div className="flex items-center justify-center rounded-lg bg-white p-3">
-        <Barcode value={item.barcode} height={55} />
+      <div className="flex items-stretch gap-3 rounded-lg bg-white p-3">
+        <div className="flex flex-1 items-center justify-center">
+          <Barcode value={item.barcode} height={55} />
+        </div>
+        <div className="flex flex-col items-center justify-center border-l border-[color:var(--border)] pl-3">
+          <QrCode value={buildScanUrl(item.barcode)} size={88} />
+          <div className="mt-1 text-[9px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
+            Scan with phone
+          </div>
+        </div>
       </div>
 
       <div className="flex items-center justify-between text-[11px] text-[color:var(--text-muted)]">

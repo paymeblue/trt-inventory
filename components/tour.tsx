@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { useSession } from "@/components/session-context";
 
 export interface TourStep {
   selector: string;
@@ -19,6 +20,11 @@ export interface TourStep {
 
 interface TourProps {
   steps: TourStep[];
+  /**
+   * Deprecated — tour completion is now tracked per-user in the database
+   * via `users.onboarded_at`. Left in the props for source-compat with
+   * existing call sites; ignored at runtime.
+   */
   storageKey?: string;
   autoStart?: boolean;
 }
@@ -56,32 +62,41 @@ function resolveBox(el: Element | null): AnchorBox | null {
 /**
  * Minimal guided product tour. Renders a dimmed backdrop, spotlights the
  * element matching each step's CSS selector, and shows a tooltip with
- * navigation. Persists a "seen" flag in localStorage per `storageKey` so it
- * only auto-opens once.
+ * navigation.
+ *
+ * Completion state is DB-backed: `users.onboarded_at`. The tour only
+ * auto-opens for a user who has never seen it (`onboardedAt === null`).
+ * Once they close/skip/finish it, we call `markOnboarded()` which POSTs
+ * to `/api/me/onboarded` and updates the session — so the tour never
+ * appears again for that account on any device.
+ *
+ * The floating "? Guided tour" button remains so users can re-open it
+ * manually on demand; only the automatic first-visit trigger is gated.
  */
-export function Tour({ steps, storageKey, autoStart = true }: TourProps) {
+export function Tour({ steps, autoStart = true }: TourProps) {
   const mounted = useIsMounted();
+  const { user, markOnboarded } = useSession();
   const [open, setOpen] = useState(false);
   const [idx, setIdx] = useState(0);
   const [box, setBox] = useState<AnchorBox | null>(null);
   const [tip, setTip] = useState<{ top: number; left: number } | null>(null);
   const rafRef = useRef<number | null>(null);
+  // Guard so the auto-open effect only fires once per mount — without
+  // this, navigating between pages that both mount <Tour /> could re-open
+  // the modal mid-session even after the user dismissed it.
+  const autoOpenedRef = useRef(false);
 
   const step = steps[idx];
 
-  // Auto-start once after mount if user hasn't seen this tour.
   useEffect(() => {
     if (!mounted || !autoStart || steps.length === 0) return;
-    if (storageKey) {
-      try {
-        if (localStorage.getItem(storageKey) === "done") return;
-      } catch {
-        // localStorage may be unavailable; just open.
-      }
-    }
+    if (autoOpenedRef.current) return;
+    // No session yet (e.g. /login) or user already onboarded → never auto-open.
+    if (!user || user.onboardedAt) return;
+    autoOpenedRef.current = true;
     const t = setTimeout(() => setOpen(true), 350);
     return () => clearTimeout(t);
-  }, [mounted, autoStart, steps.length, storageKey]);
+  }, [mounted, autoStart, steps.length, user]);
 
   const recompute = useCallback(() => {
     if (!open || !step) return;
@@ -147,15 +162,14 @@ export function Tour({ steps, storageKey, autoStart = true }: TourProps) {
     (markDone: boolean) => {
       setOpen(false);
       setIdx(0);
-      if (markDone && storageKey) {
-        try {
-          localStorage.setItem(storageKey, "done");
-        } catch {
-          // ignore
-        }
+      // Persist server-side the very first time the user finishes/skips
+      // the tour. Subsequent close events are no-ops because the session
+      // already has an onboardedAt.
+      if (markDone && user && !user.onboardedAt) {
+        void markOnboarded();
       }
     },
-    [storageKey],
+    [markOnboarded, user],
   );
 
   const openTour = useCallback(() => {
