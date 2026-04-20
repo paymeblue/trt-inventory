@@ -37,7 +37,9 @@ export function ThemeToggle() {
       aria-label={`Switch theme (current: ${label})`}
       suppressHydrationWarning
     >
-      <span aria-hidden>{icon}</span>
+      <span aria-hidden suppressHydrationWarning>
+        {icon}
+      </span>
       <span className="hidden sm:inline" suppressHydrationWarning>
         {label}
       </span>
