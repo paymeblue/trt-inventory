@@ -81,4 +81,9 @@ describe("projects replace warehouse in user-facing copy", () => {
     const src = load("app/warehouse/page.tsx");
     expect(src).toContain('redirect("/projects")');
   });
+
+  it("new project form validates incomplete item rows with explicit copy", () => {
+    const src = load("app/projects/page.tsx");
+    expect(src).toContain("Each item row needs both a SKU and a name");
+  });
 });

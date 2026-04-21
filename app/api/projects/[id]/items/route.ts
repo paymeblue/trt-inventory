@@ -1,16 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { z } from "zod";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { products, projects, stockMovements } from "@/db/schema";
 import { requireUser } from "@/lib/auth-guard";
 import { handleError, jsonError } from "@/lib/api";
-
-const createSchema = z.object({
-  sku: z.string().trim().min(1).max(80),
-  name: z.string().trim().min(1).max(160),
-  stockQuantity: z.number().int().min(0).default(0),
-});
+import { projectItemInputSchema } from "@/lib/project-validation";
 
 /**
  * POST /api/projects/[id]/items → add a new item to a project.
@@ -24,7 +18,7 @@ export async function POST(
   if ("error" in auth) return auth.error;
   try {
     const { id: projectId } = await params;
-    const body = createSchema.parse(await req.json());
+    const body = projectItemInputSchema.parse(await req.json());
 
     const project = await db.query.projects.findFirst({
       where: eq(projects.id, projectId),
@@ -34,7 +28,7 @@ export async function POST(
     const dupe = await db.query.products.findFirst({
       where: and(
         eq(products.projectId, projectId),
-        eq(products.sku, body.sku),
+        sql`lower(${products.sku}) = lower(${body.sku})`,
       ),
     });
     if (dupe) {

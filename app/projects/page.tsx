@@ -197,6 +197,17 @@ function NewProjectForm({
     setBusy(true);
     setError(null);
     try {
+      const partial = items.filter(
+        (i) =>
+          (i.sku.trim().length > 0 && i.name.trim().length === 0) ||
+          (i.sku.trim().length === 0 && i.name.trim().length > 0),
+      );
+      if (partial.length > 0) {
+        setError("Each item row needs both a SKU and a name (or clear unused rows).");
+        setBusy(false);
+        return;
+      }
+
       const cleanItems = items
         .map((i) => ({
           sku: i.sku.trim(),

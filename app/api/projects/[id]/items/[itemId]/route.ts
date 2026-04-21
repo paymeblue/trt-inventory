@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { orderItems, products, stockMovements } from "@/db/schema";
 import { requireUser } from "@/lib/auth-guard";
@@ -59,7 +59,8 @@ export async function PATCH(
       const clash = await db.query.products.findFirst({
         where: and(
           eq(products.projectId, projectId),
-          eq(products.sku, body.sku),
+          sql`lower(${products.sku}) = lower(${body.sku})`,
+          ne(products.id, itemId),
         ),
       });
       if (clash) {

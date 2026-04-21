@@ -1,31 +1,30 @@
 import { NextResponse, type NextRequest } from "next/server";
-
-const PUBLIC_PATHS = ["/login", "/api/auth/login", "/api/auth/logout", "/api/auth/me"];
+import { decideAuthRouting } from "@/lib/auth-routing";
 
 export function middleware(req: NextRequest) {
-  const { pathname } = req.nextUrl;
-
-  // Allow Next internals, static files, public auth routes.
-  if (
-    pathname.startsWith("/_next") ||
-    pathname.startsWith("/favicon") ||
-    PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))
-  ) {
-    return NextResponse.next();
-  }
-
+  const { pathname, search } = req.nextUrl;
   const hasSession = req.cookies.has("trt.session");
-  if (hasSession) return NextResponse.next();
+  const redirectParam = req.nextUrl.searchParams.get("redirect");
 
-  // API routes → 401 JSON. Pages → redirect to /login with a return URL.
-  if (pathname.startsWith("/api/")) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  const decision = decideAuthRouting({
+    pathname,
+    search,
+    hasSession,
+    redirectParam,
+  });
+
+  switch (decision.kind) {
+    case "next":
+      return NextResponse.next();
+    case "unauthenticated-json":
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    case "redirect": {
+      const url = req.nextUrl.clone();
+      url.pathname = decision.pathname;
+      url.search = decision.search ?? "";
+      return NextResponse.redirect(url);
+    }
   }
-
-  const url = req.nextUrl.clone();
-  url.pathname = "/login";
-  url.searchParams.set("redirect", pathname + req.nextUrl.search);
-  return NextResponse.redirect(url);
 }
 
 export const config = {
