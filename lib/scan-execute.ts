@@ -1,9 +1,10 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   orderItems,
   orders,
   products,
+  projects,
   stockMovements,
   type Order,
 } from "@/db/schema";
@@ -30,14 +31,15 @@ export type ScanExecuteResult = ScanExecuteSuccess | ScanExecuteError;
  *   - POST /api/orders/[id]/scan (manual / camera / keyboard)
  *   - GET  /s/[barcode]          (QR deep-link from a phone camera)
  *
- * Keeps all the safety guarantees in one place:
+ * Safety guarantees:
  *   1. Refuses to touch a fulfilled order.
- *   2. Takes SELECT ... FOR UPDATE on the target order_item row, so
- *      concurrent scans of the same barcode serialise.
- *   3. Item scan + stock decrement + stock_movements audit row all
+ *   2. SELECT ... FOR UPDATE serialises concurrent scans of the same
+ *      order_item row.
+ *   3. Stock decrement is scoped by (project_id, sku) now that SKUs
+ *      are only unique per project — a collision across projects would
+ *      otherwise decrement the wrong warehouse.
+ *   4. Item scan + stock decrement + stock_movements audit row all
  *      commit atomically, or none of them do.
- *   4. Surfaces SKU-deleted-mid-order as a distinct error instead of
- *      silently "succeeding" with no stock movement.
  */
 export async function executeScan({
   orderId,
@@ -90,7 +92,12 @@ export async function executeScan({
       const [prodRow] = await tx
         .update(products)
         .set({ stockQuantity: sql`${products.stockQuantity} - 1` })
-        .where(eq(products.sku, sku))
+        .where(
+          and(
+            eq(products.projectId, order.projectId),
+            eq(products.sku, sku),
+          ),
+        )
         .returning({ stock: products.stockQuantity, id: products.id });
 
       if (!prodRow) return { kind: "sku_deleted", sku };
@@ -141,9 +148,9 @@ export async function executeScan({
  * deep-link `/s/[barcode]` route so a phone camera QR scan can find the
  * right order without the user knowing the order id.
  *
- * Returns the item + its order, or null if the barcode doesn't exist.
- * Does NOT filter by order status — the caller decides what to do with
- * fulfilled orders, so we can show a helpful message instead of 404.
+ * Returns the item + its order + the parent project name, or null if
+ * the barcode doesn't exist. Does NOT filter by order status — the
+ * caller decides what to do with fulfilled orders.
  */
 export async function findOrderByBarcode(barcode: string) {
   const [row] = await db
@@ -153,10 +160,12 @@ export async function findOrderByBarcode(barcode: string) {
       itemScannedAt: orderItems.scannedAt,
       orderId: orders.id,
       orderStatus: orders.status,
-      projectName: orders.projectName,
+      projectId: orders.projectId,
+      projectName: projects.name,
     })
     .from(orderItems)
     .innerJoin(orders, eq(orders.id, orderItems.orderId))
+    .innerJoin(projects, eq(projects.id, orders.projectId))
     .where(eq(orderItems.barcode, barcode))
     .limit(1);
   return row ?? null;

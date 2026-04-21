@@ -33,7 +33,7 @@ export async function POST(
     if (result.kind === "sku_deleted") {
       return jsonError(
         409,
-        `Warehouse SKU "${result.sku}" no longer exists. Recreate it or rebuild the order.`,
+        `Item SKU "${result.sku}" no longer exists in this project. Recreate it or rebuild the order.`,
       );
     }
 

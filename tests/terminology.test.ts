@@ -47,3 +47,38 @@ describe("installer-facing terminology", () => {
     expect(src).toContain("Verification log");
   });
 });
+
+/**
+ * Projects-over-warehouse guardrail. After the refactor the global
+ * "warehouse" concept went away — items live inside projects and are
+ * unique per-project. These tests pin that rename down in the surfaces
+ * users actually see, so a future commit can't silently resurrect the
+ * old wording.
+ */
+describe("projects replace warehouse in user-facing copy", () => {
+  it("sidebar no longer links to a warehouse page", () => {
+    const src = load("components/sidebar.tsx");
+    expect(src).toContain("/projects");
+    expect(src).not.toMatch(/href:\s*"\/warehouse"/);
+    expect(src).not.toMatch(/label:\s*"Warehouse"/);
+  });
+
+  it("help page talks about projects, not a global warehouse", () => {
+    const src = load("app/help/page.tsx");
+    expect(src).toContain("Create a project");
+    // We still allow the word "warehouse" nowhere in the help copy now
+    // that every item lives in a project.
+    expect(src).not.toMatch(/warehouse/i);
+  });
+
+  it("dashboard quick actions reference projects instead of a warehouse", () => {
+    const src = load("app/page.tsx");
+    expect(src).toContain("Manage projects");
+    expect(src).not.toContain("Manage warehouse");
+  });
+
+  it("old /warehouse route only exists as a redirect", () => {
+    const src = load("app/warehouse/page.tsx");
+    expect(src).toContain('redirect("/projects")');
+  });
+});

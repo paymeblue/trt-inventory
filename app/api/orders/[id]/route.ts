@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { orderItems, orders } from "@/db/schema";
+import { orderItems, orders, projects } from "@/db/schema";
 import { requireUser } from "@/lib/auth-guard";
 import { handleError, jsonError } from "@/lib/api";
 import { computeProgress } from "@/lib/scan";
@@ -19,13 +19,17 @@ export async function GET(
     });
     if (!order) return jsonError(404, "Order not found");
 
-    const items = await db.query.orderItems.findMany({
-      where: eq(orderItems.orderId, id),
-      orderBy: [asc(orderItems.createdAt)],
-    });
+    const [project, items] = await Promise.all([
+      db.query.projects.findFirst({ where: eq(projects.id, order.projectId) }),
+      db.query.orderItems.findMany({
+        where: eq(orderItems.orderId, id),
+        orderBy: [asc(orderItems.createdAt)],
+      }),
+    ]);
 
     return NextResponse.json({
       order,
+      project,
       items,
       progress: computeProgress(items),
     });

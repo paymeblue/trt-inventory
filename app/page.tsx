@@ -14,9 +14,11 @@ interface StatsResponse {
     anomaly: number;
   };
   items: { totalItems: number; scannedItems: number };
-  warehouse: { skus: number; totalStock: number; negative: number };
+  inventory: { skus: number; totalStock: number; negative: number };
+  projects: { total: number; active: number };
   recent: {
     id: string;
+    projectId: string;
     projectName: string;
     status: OrderStatus;
     createdBy: string;
@@ -33,11 +35,11 @@ export default function DashboardPage() {
   if (!user) return null;
 
   const tiles = [
-    { label: "Total Orders", value: data?.orders.total ?? 0, tone: "text-[color:var(--text)]" },
-    { label: "Active", value: data?.orders.active ?? 0, tone: "text-[color:var(--info)]" },
+    { label: "Projects", value: data?.projects.total ?? 0, tone: "text-[color:var(--text)]" },
+    { label: "Active orders", value: data?.orders.active ?? 0, tone: "text-[color:var(--info)]" },
     { label: "Fulfilled", value: data?.orders.fulfilled ?? 0, tone: "text-[color:var(--success)]" },
     { label: "Anomalies", value: data?.orders.anomaly ?? 0, tone: "text-[color:var(--danger)]" },
-    { label: "SKUs in stock", value: data?.warehouse.totalStock ?? 0, tone: "text-[color:var(--text)]" },
+    { label: "Items in stock", value: data?.inventory.totalStock ?? 0, tone: "text-[color:var(--text)]" },
   ];
 
   const scanRate =
@@ -53,7 +55,7 @@ export default function DashboardPage() {
         </h1>
         <p className="text-sm text-[color:var(--text-muted)]">
           {user.role === "pm"
-            ? "Create orders, manage the warehouse, and onboard installers."
+            ? "Create projects, manage their items, and onboard installers."
             : "Open an active order and verify deliveries as they arrive on site."}
         </p>
       </section>
@@ -110,11 +112,11 @@ export default function DashboardPage() {
           <div className="mt-4 flex flex-col gap-2">
             {user.role === "pm" ? (
               <>
-                <Link href="/orders/new" className="btn btn-primary">
-                  + Create new order
+                <Link href="/projects" className="btn btn-primary">
+                  + Manage projects
                 </Link>
-                <Link href="/warehouse" className="btn btn-ghost">
-                  Manage warehouse
+                <Link href="/orders/new" className="btn btn-ghost">
+                  New order
                 </Link>
                 <Link href="/team" className="btn btn-ghost">
                   Onboard an installer
@@ -134,10 +136,10 @@ export default function DashboardPage() {
         </div>
       </section>
 
-      {data && data.warehouse.negative > 0 && (
+      {data && data.inventory.negative > 0 && (
         <div className="card border-[color:var(--danger)] p-4 text-sm text-[color:var(--danger)]">
-          {data.warehouse.negative} SKU(s) have negative stock. You may have
-          delivered items that weren&apos;t recorded in the warehouse.
+          {data.inventory.negative} item(s) have negative stock. You may have
+          verified deliveries that weren&apos;t recorded against the project.
         </div>
       )}
 

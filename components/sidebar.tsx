@@ -7,10 +7,10 @@ import type { Role } from "@/db/schema";
 
 const navAll: { href: string; label: string; icon: string; roles: Role[] }[] = [
   { href: "/", label: "Dashboard", icon: "◆", roles: ["pm", "installer"] },
+  { href: "/projects", label: "Projects", icon: "▥", roles: ["pm", "installer"] },
   { href: "/orders", label: "Orders", icon: "▤", roles: ["pm", "installer"] },
   { href: "/orders/new", label: "New Order", icon: "✚", roles: ["pm"] },
   { href: "/scan", label: "Verify deliveries", icon: "⎚", roles: ["installer"] },
-  { href: "/warehouse", label: "Warehouse", icon: "▥", roles: ["pm"] },
   { href: "/team", label: "Team", icon: "◎", roles: ["pm"] },
   { href: "/help", label: "How it works", icon: "?", roles: ["pm", "installer"] },
 ];

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { desc, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { orderItems, orders, products } from "@/db/schema";
+import { orderItems, orders, products, projects } from "@/db/schema";
 import { requireUser } from "@/lib/auth-guard";
 import { handleError } from "@/lib/api";
 
@@ -25,7 +25,7 @@ export async function GET() {
       })
       .from(orderItems);
 
-    const [warehouse] = await db
+    const [inventory] = await db
       .select({
         skus: sql<number>`count(*)::int`,
         totalStock: sql<number>`coalesce(sum(stock_quantity), 0)::int`,
@@ -33,8 +33,15 @@ export async function GET() {
       })
       .from(products);
 
+    const [projectCounts] = await db
+      .select({
+        total: sql<number>`count(*)::int`,
+        active: sql<number>`count(*) filter (where archived_at is null)::int`,
+      })
+      .from(projects);
+
     const recent = await db.query.orders.findMany({
-      with: { items: true },
+      with: { items: true, project: true },
       orderBy: [desc(orders.createdAt)],
       limit: 5,
     });
@@ -42,10 +49,12 @@ export async function GET() {
     return NextResponse.json({
       orders: orderCounts,
       items: itemCounts,
-      warehouse,
+      inventory,
+      projects: projectCounts,
       recent: recent.map((o) => ({
         id: o.id,
-        projectName: o.projectName,
+        projectId: o.projectId,
+        projectName: o.project?.name ?? "Unknown project",
         status: o.status,
         createdBy: o.createdBy,
         createdAt: o.createdAt,

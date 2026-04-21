@@ -11,7 +11,7 @@ import { buildScanUrl } from "@/lib/scan-url";
 import { StatusPill } from "@/components/status-pill";
 import { ScanInput } from "@/components/scan-input";
 import { Tour, type TourStep } from "@/components/tour";
-import type { Order, OrderItem, Product } from "@/db/schema";
+import type { Order, OrderItem, Product, Project } from "@/db/schema";
 import type { ScanOutcome } from "@/lib/scan";
 import {
   classifyNetworkError,
@@ -21,6 +21,7 @@ import {
 
 interface DetailResponse {
   order: Order;
+  project: Project | null;
   items: OrderItem[];
   progress: {
     total: number;
@@ -30,8 +31,9 @@ interface DetailResponse {
   };
 }
 
-interface ProductsResponse {
-  products: Product[];
+interface ProjectDetailResponse {
+  project: Project;
+  items: Product[];
 }
 
 type FeedEntry =
@@ -84,7 +86,12 @@ export default function OrderDetailPage({
   const { data, mutate, error, isLoading } = useSWR<DetailResponse>(
     `/api/orders/${id}`,
   );
-  const { data: prodData } = useSWR<ProductsResponse>("/api/products");
+  // Scope the SKU picker / item lookups to the order's parent project —
+  // SKUs are no longer globally unique, so fetching all products would
+  // be incorrect.
+  const { data: projectData } = useSWR<ProjectDetailResponse>(
+    data?.order.projectId ? `/api/projects/${data.order.projectId}` : null,
+  );
 
   if (!user) return null;
 
@@ -106,8 +113,9 @@ export default function OrderDetailPage({
     user.role === "installer" &&
     (data.order.status === "active" || data.order.status === "anomaly");
 
+  const projectItems = projectData?.items ?? [];
   const productByKey = new Map<string, Product>();
-  for (const p of prodData?.products ?? []) productByKey.set(p.sku, p);
+  for (const p of projectItems) productByKey.set(p.sku, p);
 
   return (
     <div className="space-y-6">
@@ -120,7 +128,18 @@ export default function OrderDetailPage({
       <header className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold">{data.order.projectName}</h1>
+            <h1 className="text-2xl font-semibold">
+              {data.project ? (
+                <Link
+                  href={`/projects/${data.project.id}`}
+                  className="hover:underline"
+                >
+                  {data.project.name}
+                </Link>
+              ) : (
+                "Unknown project"
+              )}
+            </h1>
             <StatusPill status={data.order.status} />
           </div>
           <div className="mt-1 text-xs text-[color:var(--text-muted)]">
@@ -167,7 +186,7 @@ export default function OrderDetailPage({
         <PmView
           order={data.order}
           items={data.items}
-          products={prodData?.products ?? []}
+          products={projectItems}
           productByKey={productByKey}
           refresh={mutate}
           canEdit={canEdit}
@@ -258,8 +277,8 @@ function PmView({
     },
     {
       selector: "[data-tour='pm-add-item']",
-      title: "Add items from your warehouse",
-      body: "Pick any SKU that has stock. Each added item gets a unique barcode.",
+      title: "Add items from this project",
+      body: "Pick any SKU that belongs to this project. Each added item gets a unique barcode.",
     },
     {
       selector: "[data-tour='first-item']",
@@ -320,8 +339,9 @@ function PmView({
             Add items to this order
           </h2>
           <p className="mt-1 text-xs text-[color:var(--text-muted)]">
-            Pick a warehouse SKU. A unique printable barcode is generated
-            automatically. You can add items until the first scan happens.
+            Pick a SKU from this project. A unique printable barcode is
+            generated automatically. You can add items until the first scan
+            happens.
           </p>
           <form onSubmit={addItem} className="mt-4 flex flex-col gap-2 sm:flex-row">
             <select
@@ -330,7 +350,7 @@ function PmView({
               onChange={(e) => setProductId(e.target.value)}
               required
             >
-              <option value="">— Select a warehouse SKU —</option>
+              <option value="">— Select a project item —</option>
               {available.map((p) => (
                 <option key={p.id} value={p.sku}>
                   {p.sku} — {p.name} (stock: {p.stockQuantity})
@@ -346,9 +366,9 @@ function PmView({
           </form>
           {products.length === 0 && (
             <p className="mt-3 text-xs text-[color:var(--warning)]">
-              No products in the warehouse yet.{" "}
+              This project has no items yet.{" "}
               <Link
-                href="/warehouse"
+                href={`/projects/${order.projectId}`}
                 className="font-semibold text-[color:var(--primary)] underline"
               >
                 Add one →
@@ -543,7 +563,7 @@ function InstallerView({
     {
       selector: "[data-tour='scan-box']",
       title: "Verify items here",
-      body: "Use your phone camera, a handheld scanner, or type/paste the barcode. A valid read instantly acknowledges the item and decrements warehouse stock.",
+      body: "Use your phone camera, a handheld scanner, or type/paste the barcode. A valid read instantly acknowledges the item and decrements the project's item stock.",
     },
     {
       selector: "[data-tour='pending']",
@@ -765,8 +785,8 @@ function OrderResolvedCard({ total }: { total: number }) {
           </div>
           <p className="text-sm text-[color:var(--text)]">
             All {total} item{total === 1 ? "" : "s"} on this order have been
-            acknowledged. Warehouse stock has been deducted and the order is
-            now marked as fulfilled.
+            acknowledged. The project&apos;s item stock has been deducted
+            and the order is now marked as fulfilled.
           </p>
         </div>
       </div>
@@ -801,7 +821,7 @@ function ScanOutcomeCard({
           ✓ Item acknowledged
           {sku && typeof stockAfter === "number" && (
             <span className="ml-2 font-normal text-[color:var(--text-muted)]">
-              — {sku} warehouse stock now {stockAfter}
+              — {sku} stock now {stockAfter}
             </span>
           )}
         </>

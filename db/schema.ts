@@ -35,19 +35,48 @@ export const users = pgTable(
     /**
      * Timestamp at which the user finished (or skipped) the guided product
      * tour. Null means they're a brand-new user and the tour should auto-
-     * open on their first visit to a page that wires one up. Once set,
-     * the tour never auto-opens again — they can still re-open it manually
-     * via the "? Guided tour" floating button.
+     * open on their first visit to a page that wires one up.
      */
     onboardedAt: timestamp("onboarded_at", { withTimezone: true }),
   },
   (t) => [uniqueIndex("users_email_unique").on(t.email)],
 );
 
+/**
+ * Projects are the top-level container. Replaces the old global warehouse:
+ * every item (SKU + stock) belongs to exactly one project, and every order
+ * is scoped to one project. Items can never be used by another project.
+ */
+export const projects = pgTable(
+  "projects",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    name: text("name").notNull(),
+    description: text("description"),
+    createdById: uuid("created_by_id").references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+  },
+  (t) => [uniqueIndex("projects_name_unique").on(t.name)],
+);
+
+/**
+ * Items live inside a project. SKUs are only unique within the parent
+ * project (so "INV-001" can exist in Project A and Project B separately).
+ * Deleting a project cascades its items away.
+ */
 export const products = pgTable(
   "products",
   {
     id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
     sku: text("sku").notNull(),
     name: text("name").notNull(),
     stockQuantity: integer("stock_quantity").notNull().default(0),
@@ -55,12 +84,14 @@ export const products = pgTable(
       .defaultNow()
       .notNull(),
   },
-  (t) => [uniqueIndex("products_sku_unique").on(t.sku)],
+  (t) => [uniqueIndex("products_project_sku_unique").on(t.projectId, t.sku)],
 );
 
 export const orders = pgTable("orders", {
   id: uuid("id").defaultRandom().primaryKey(),
-  projectName: text("project_name").notNull(),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "restrict" }),
   status: orderStatusEnum("status").notNull().default("draft"),
   createdBy: text("created_by").notNull(),
   createdById: uuid("created_by_id").references(() => users.id),
@@ -78,6 +109,13 @@ export const orderItems = pgTable(
     orderId: uuid("order_id")
       .notNull()
       .references(() => orders.id, { onDelete: "cascade" }),
+    /**
+     * Stores the SKU string of the product line at the time of creation.
+     * We keep this as text (not an FK) so deleting a project's product
+     * doesn't orphan historical order_items — the SKU remains as a
+     * snapshot for audit. Cross-project validation is enforced at the
+     * application layer when items are added to an order.
+     */
     productId: text("product_id").notNull(),
     barcode: text("barcode").notNull(),
     scannedAt: timestamp("scanned_at", { withTimezone: true }),
@@ -110,8 +148,28 @@ export const stockMovements = pgTable("stock_movements", {
     .notNull(),
 });
 
+export const projectsRelations = relations(projects, ({ many, one }) => ({
+  items: many(products),
+  orders: many(orders),
+  createdByUser: one(users, {
+    fields: [projects.createdById],
+    references: [users.id],
+  }),
+}));
+
+export const productsRelations = relations(products, ({ one }) => ({
+  project: one(projects, {
+    fields: [products.projectId],
+    references: [projects.id],
+  }),
+}));
+
 export const ordersRelations = relations(orders, ({ many, one }) => ({
   items: many(orderItems),
+  project: one(projects, {
+    fields: [orders.projectId],
+    references: [projects.id],
+  }),
   createdByUser: one(users, {
     fields: [orders.createdById],
     references: [users.id],
@@ -135,10 +193,13 @@ export const usersRelations = relations(users, ({ one, many }) => ({
     references: [users.id],
   }),
   createdOrders: many(orders),
+  createdProjects: many(projects),
 }));
 
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
+export type Project = typeof projects.$inferSelect;
+export type NewProject = typeof projects.$inferInsert;
 export type Product = typeof products.$inferSelect;
 export type NewProduct = typeof products.$inferInsert;
 export type Order = typeof orders.$inferSelect;

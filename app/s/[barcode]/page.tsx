@@ -88,8 +88,8 @@ export default async function ScanDeepLinkPage({
     return (
       <OutcomeShell
         status="blocked"
-        title="Warehouse SKU missing"
-        body={`SKU "${result.sku}" no longer exists in the warehouse. The scan was rolled back. Ask a PM to recreate the SKU or rebuild the order.`}
+        title="Project item missing"
+        body={`SKU "${result.sku}" no longer exists in this project. The scan was rolled back. Ask a PM to recreate the item or rebuild the order.`}
         orderHref={orderHref}
       />
     );
@@ -127,7 +127,7 @@ function OutcomeView({
         title={done ? "Order resolved" : "Item acknowledged"}
         body={
           done
-            ? `Every item on "${projectName}" has been scanned. The order is now marked fulfilled and warehouse stock is up to date.`
+            ? `Every item on "${projectName}" has been scanned. The order is now marked fulfilled and the project's item stock is up to date.`
             : `Scan recorded on "${projectName}". ${progress.scanned}/${progress.total} items verified (${progress.percent}%).`
         }
         stock={stock}
@@ -217,7 +217,7 @@ function OutcomeShell({
             <p className="mt-1 text-sm text-[color:var(--text)]">{body}</p>
             {stock && (
               <p className="mt-2 text-xs text-[color:var(--text-muted)]">
-                Warehouse stock for{" "}
+                Project stock for{" "}
                 <span className="font-mono">{stock.sku}</span> is now{" "}
                 <strong>{stock.stockQuantity}</strong>.
               </p>

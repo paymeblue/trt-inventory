@@ -11,6 +11,13 @@ const addItemSchema = z.object({
   productId: z.string().trim().min(1, "productId required").max(80),
 });
 
+/**
+ * POST /api/orders/[id]/items → append an item line to an order by SKU.
+ *
+ * The SKU must exist inside the order's own project — cross-project
+ * item reuse is rejected, which is the invariant that makes items
+ * "unique to a project".
+ */
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -38,12 +45,15 @@ export async function POST(
     }
 
     const product = await db.query.products.findFirst({
-      where: eq(products.sku, productId),
+      where: and(
+        eq(products.projectId, order.projectId),
+        eq(products.sku, productId),
+      ),
     });
     if (!product) {
       return jsonError(
         400,
-        `Unknown product SKU "${productId}". Add it to the warehouse first.`,
+        `SKU "${productId}" does not exist in this project. Add it to the project's items first.`,
       );
     }
 

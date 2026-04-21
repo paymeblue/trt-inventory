@@ -52,25 +52,31 @@ export default function HelpPage() {
             A unique CODE128 label generated per order item (e.g.
             <span className="font-mono"> TRT-AB12CD34EF56</span>).
           </Def>
-          <Def term="SKU">
-            A warehouse product identifier you manage on the{" "}
+          <Def term="Project">
+            The top-level container. Every item and every order belongs to
+            one project; items cannot be shared across projects.
+          </Def>
+          <Def term="Item / SKU">
+            A product identifier scoped to a project. Manage them from the
+            project&apos;s detail page under{" "}
             <Link
-              href="/warehouse"
+              href="/projects"
               className="text-[color:var(--primary)] underline"
             >
-              Warehouse
-            </Link>{" "}
-            page.
+              Projects
+            </Link>
+            .
           </Def>
           <Def term="Order">
-            A collection of items (one per SKU) shipped to a project site.
+            A collection of items from one project, shipped out as a
+            delivery to be verified on-site.
           </Def>
           <Def term="Active">
             An order that is ready to be verified on-site.
           </Def>
           <Def term="Fulfilled">
-            Every item in the order has been verified. Warehouse stock was
-            decremented accordingly.
+            Every item in the order has been verified. The project&apos;s
+            item stock was decremented accordingly.
           </Def>
           <Def term="Anomaly">
             The order received an unexpected barcode. Still verifiable, but
@@ -85,18 +91,19 @@ export default function HelpPage() {
 function PmGuide() {
   const steps: Step[] = [
     {
-      title: "Stock your warehouse",
+      title: "Create a project",
       body: (
         <>
           Go to{" "}
           <Link
-            href="/warehouse"
+            href="/projects"
             className="text-[color:var(--primary)] underline"
           >
-            Warehouse
-          </Link>{" "}
-          and add every SKU you ship with an initial stock quantity. You
-          can always add more later.
+            Projects
+          </Link>
+          , hit <b>+ New project</b>, give it a name, and add the items
+          (SKUs) it will track. Items belong to this project alone — they
+          can never be reused by another project.
         </>
       ),
     },
@@ -114,13 +121,13 @@ function PmGuide() {
       ),
     },
     {
-      title: "Create an order",
+      title: "Create an order under the project",
       body: (
         <>
-          Hit <b>+ New Order</b>, give it a project name, and open it. Add
-          one SKU at a time — each one gets its own printable barcode and
-          QR code. You can add or remove items freely until the first item
-          is verified.
+          Hit <b>+ New Order</b>, pick the project, and open it. Add one
+          SKU at a time from the project&apos;s items — each one gets its
+          own printable barcode and QR code. You can add or remove items
+          freely until the first item is verified.
         </>
       ),
     },
@@ -138,7 +145,8 @@ function PmGuide() {
       body: (
         <>
           The installer verifies each label on-site. You&apos;ll see the
-          progress bar move in real time and warehouse stock auto-decrement.
+          progress bar move in real time and the project&apos;s item stock
+          auto-decrement.
           When every item is verified, the order flips to{" "}
           <b>Fulfilled</b>.
         </>
@@ -189,8 +197,8 @@ function InstallerGuide() {
       body: (
         <>
           The progress bar at the top shows how close the order is to done.
-          Warehouse stock is automatically decremented on every valid
-          verification.
+          The project&apos;s item stock is automatically decremented on every
+          valid verification.
         </>
       ),
     },
