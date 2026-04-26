@@ -7,6 +7,15 @@ export interface AuthenticatedActor {
   email: string;
   role: Role;
   name: string;
+  /**
+   * Set by `getPrintedScanActor()` when the scan is being authorised by
+   * a signed sticker token rather than an iron-session cookie.
+   *
+   * When true, `executeScan` skips writing this actor's `userId` into
+   * FK-bound columns (`scanned_by_id`, `stock_movements.user_id`) — the
+   * synthetic actor isn't a real `users` row.
+   */
+  isPrintedScan?: boolean;
 }
 
 /**

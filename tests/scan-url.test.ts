@@ -62,4 +62,22 @@ describe("buildScanUrl", () => {
       buildScanUrl("TRT-ABC", { envOrigin: "   ", windowOrigin: "  " }),
     ).toBe("/s/TRT-ABC");
   });
+
+  it("appends ?st= when scanToken is set", () => {
+    expect(
+      buildScanUrl("TRT-ABC", {
+        envOrigin: "https://trt.app",
+        scanToken: "sig.part",
+      }),
+    ).toBe("https://trt.app/s/TRT-ABC?st=sig.part");
+  });
+
+  it("percent-encodes the scan token query value", () => {
+    expect(
+      buildScanUrl("TRT-ABC", {
+        envOrigin: "https://trt.app",
+        scanToken: "a=b&c",
+      }),
+    ).toBe("https://trt.app/s/TRT-ABC?st=a%3Db%26c");
+  });
 });

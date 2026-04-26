@@ -10,16 +10,30 @@
  *      needs a publicly-resolvable URL. Trailing slash is stripped.
  *   2. `windowOrigin` — `window.location.origin` on the client. Fine in
  *      prod where the current origin already matches what the phone will
- *      use.
+ *      use (most Netlify-style deployments don't need NEXT_PUBLIC_APP_URL).
  *   3. Empty string → relative path, which still works if the scan
  *      happens on the same origin the QR was printed from.
+ *
+ * Optional `scanToken` carries a signed printed-sticker token (see
+ * `lib/printed-scan-token.ts`) so a 3rd-party phone scanner can resolve
+ * the scan with **zero login friction**: `/s/<barcode>?st=<token>` is
+ * a fully self-authorising URL bound to that one item.
  */
+export interface BuildScanUrlOptions {
+  envOrigin?: string | null;
+  windowOrigin?: string | null;
+  scanToken?: string | null;
+}
+
 export function buildScanUrl(
   barcode: string,
-  opts?: { envOrigin?: string | null; windowOrigin?: string | null },
+  opts?: BuildScanUrlOptions,
 ): string {
   const env = (opts?.envOrigin ?? "").trim().replace(/\/+$/, "");
   const win = (opts?.windowOrigin ?? "").trim().replace(/\/+$/, "");
   const origin = env || win || "";
-  return `${origin}/s/${encodeURIComponent(barcode)}`;
+  const path = `${origin}/s/${encodeURIComponent(barcode)}`;
+  const token = (opts?.scanToken ?? "").trim();
+  if (!token) return path;
+  return `${path}?st=${encodeURIComponent(token)}`;
 }

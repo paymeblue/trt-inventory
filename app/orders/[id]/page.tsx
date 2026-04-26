@@ -1,28 +1,35 @@
-"use client";
+'use client';
 
-import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
-import useSWR from "@/lib/swr";
-import { useAuthedUser } from "@/components/session-context";
-import { Barcode } from "@/components/barcode";
-import { QrCode } from "@/components/qr-code";
-import { buildScanUrl } from "@/lib/scan-url";
-import { StatusPill } from "@/components/status-pill";
-import { ScanInput } from "@/components/scan-input";
-import { Tour, type TourStep } from "@/components/tour";
-import type { Order, OrderItem, Product, Project } from "@/db/schema";
-import type { ScanOutcome } from "@/lib/scan";
+import { use, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import useSWR from '@/lib/swr';
+import { useAuthedUser } from '@/components/session-context';
+import { Barcode } from '@/components/barcode';
+import { QrCode } from '@/components/qr-code';
+import { buildScanUrl } from '@/lib/scan-url';
+import { StatusPill } from '@/components/status-pill';
+import { ScanInput } from '@/components/scan-input';
+import { Tour, type TourStep } from '@/components/tour';
+import type { Order, OrderItem, Product, Project } from '@/db/schema';
+import type { ScanOutcome } from '@/lib/scan';
 import {
   classifyNetworkError,
   classifyScanResponse,
   type ScanCallResult,
-} from "@/lib/scan-client";
+} from '@/lib/scan-client';
+
+/**
+ * The order detail API enriches each item with a signed printed-scan
+ * token (`lib/printed-scan-token.ts`) so the QR/CODE128 sticker URL
+ * resolves a scan with zero login friction on the installer's phone.
+ */
+type OrderItemWithToken = OrderItem & { printedScanToken?: string };
 
 interface DetailResponse {
   order: Order;
   project: Project | null;
-  items: OrderItem[];
+  items: OrderItemWithToken[];
   progress: {
     total: number;
     scanned: number;
@@ -39,7 +46,7 @@ interface ProjectDetailResponse {
 type FeedEntry =
   | {
       id: string;
-      kind: "valid";
+      kind: 'valid';
       productId: string;
       barcode: string;
       stockAfter?: number;
@@ -47,15 +54,15 @@ type FeedEntry =
     }
   | {
       id: string;
-      kind: "duplicate";
+      kind: 'duplicate';
       productId: string;
       barcode: string;
       at: number;
     }
-  | { id: string; kind: "invalid"; barcode: string; at: number };
+  | { id: string; kind: 'invalid'; barcode: string; at: number };
 
 function fmt(ts: string | Date | null | undefined) {
-  if (!ts) return "—";
+  if (!ts) return '—';
   return new Date(ts).toLocaleString();
 }
 
@@ -63,14 +70,19 @@ function fmt(ts: string | Date | null | undefined) {
  * Convenience binding for the React tree: resolves `NEXT_PUBLIC_APP_URL`
  * and `window.location.origin` at call-time and delegates to the pure
  * `buildScanUrl` in `@/lib/scan-url` (covered by unit tests).
+ *
+ * `scanToken` (if supplied) is appended as `?st=<token>` so the URL is
+ * self-authorising — the installer's phone scanner opens it directly,
+ * no login wall, no tap-to-paste.
  */
-function resolveScanUrl(barcode: string) {
+function resolveScanUrl(barcode: string, scanToken?: string) {
   return buildScanUrl(barcode, {
     envOrigin: process.env.NEXT_PUBLIC_APP_URL,
     windowOrigin:
-      typeof window !== "undefined" && window.location
+      typeof window !== 'undefined' && window.location
         ? window.location.origin
         : null,
+    scanToken,
   });
 }
 
@@ -96,7 +108,9 @@ export default function OrderDetailPage({
   if (!user) return null;
 
   if (isLoading) {
-    return <div className="text-sm text-[color:var(--text-muted)]">Loading…</div>;
+    return (
+      <div className="text-sm text-[color:var(--text-muted)]">Loading…</div>
+    );
   }
   if (error || !data) {
     return (
@@ -108,10 +122,10 @@ export default function OrderDetailPage({
 
   const anyScanned = data.items.some((i) => i.scannedAt !== null);
   const canEdit =
-    user.role === "pm" && data.order.status !== "fulfilled" && !anyScanned;
+    user.role === 'pm' && data.order.status !== 'fulfilled' && !anyScanned;
   const canScan =
-    user.role === "installer" &&
-    (data.order.status === "active" || data.order.status === "anomaly");
+    user.role === 'installer' &&
+    (data.order.status === 'active' || data.order.status === 'anomaly');
 
   const projectItems = projectData?.items ?? [];
   const productByKey = new Map<string, Product>();
@@ -137,22 +151,22 @@ export default function OrderDetailPage({
                   {data.project.name}
                 </Link>
               ) : (
-                "Unknown project"
+                'Unknown project'
               )}
             </h1>
             <StatusPill status={data.order.status} />
           </div>
           <div className="mt-1 text-xs text-[color:var(--text-muted)]">
-            Order ID <span className="font-mono">{data.order.id.slice(0, 8)}</span>
-            {" "}· created by {data.order.createdBy} on{" "}
-            {fmt(data.order.createdAt)}
+            Order ID{' '}
+            <span className="font-mono">{data.order.id.slice(0, 8)}</span> ·
+            created by {data.order.createdBy} on {fmt(data.order.createdAt)}
             {data.order.fulfilledAt && (
               <> · fulfilled {fmt(data.order.fulfilledAt)}</>
             )}
           </div>
         </div>
         <div className="no-print flex flex-wrap gap-2">
-          {user.role === "pm" && data.items.length > 0 && (
+          {user.role === 'pm' && data.items.length > 0 && (
             <button
               className="btn btn-ghost"
               onClick={() => window.print()}
@@ -165,11 +179,11 @@ export default function OrderDetailPage({
             <button
               className="btn btn-ghost text-[color:var(--danger)]"
               onClick={async () => {
-                if (!confirm("Delete this order?")) return;
+                if (!confirm('Delete this order?')) return;
                 const res = await fetch(`/api/orders/${id}`, {
-                  method: "DELETE",
+                  method: 'DELETE',
                 });
-                if (res.ok) router.push("/orders");
+                if (res.ok) router.push('/orders');
               }}
             >
               Delete order
@@ -182,7 +196,7 @@ export default function OrderDetailPage({
         <ProgressCard progress={data.progress} status={data.order.status} />
       </div>
 
-      {user.role === "pm" ? (
+      {user.role === 'pm' ? (
         <PmView
           order={data.order}
           items={data.items}
@@ -209,8 +223,8 @@ function ProgressCard({
   progress,
   status,
 }: {
-  progress: DetailResponse["progress"];
-  status: Order["status"];
+  progress: DetailResponse['progress'];
+  status: Order['status'];
 }) {
   return (
     <section className="card p-6">
@@ -220,8 +234,8 @@ function ProgressCard({
             Verification progress
           </div>
           <div className="mt-1 text-2xl font-bold">
-            {progress.scanned}{" "}
-            <span className="text-[color:var(--text-muted)]">of</span>{" "}
+            {progress.scanned}{' '}
+            <span className="text-[color:var(--text-muted)]">of</span>{' '}
             {progress.total}
             <span className="ml-2 text-base font-medium text-[color:var(--text-muted)]">
               items verified
@@ -233,11 +247,11 @@ function ProgressCard({
       <div className="mt-4 h-3 w-full overflow-hidden rounded-full bg-[color:var(--surface-muted)]">
         <div
           className={`h-full rounded-full transition-all ${
-            status === "fulfilled"
-              ? "bg-[color:var(--success)]"
-              : status === "anomaly"
-                ? "bg-[color:var(--danger)]"
-                : "bg-[color:var(--primary)]"
+            status === 'fulfilled'
+              ? 'bg-[color:var(--success)]'
+              : status === 'anomaly'
+                ? 'bg-[color:var(--danger)]'
+                : 'bg-[color:var(--primary)]'
           }`}
           style={{ width: `${progress.percent}%` }}
         />
@@ -259,36 +273,36 @@ function PmView({
   canEdit,
 }: {
   order: Order;
-  items: OrderItem[];
+  items: OrderItemWithToken[];
   products: Product[];
   productByKey: Map<string, Product>;
   refresh: () => Promise<void>;
   canEdit: boolean;
 }) {
-  const [productId, setProductId] = useState("");
+  const [productId, setProductId] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const tourSteps: TourStep[] = [
     {
       selector: "[data-tour='progress']",
-      title: "Track fulfillment live",
-      body: "Every time an installer scans an item, this bar jumps in real time.",
+      title: 'Track fulfillment live',
+      body: 'Every time an installer scans an item, this bar jumps in real time.',
     },
     {
       selector: "[data-tour='pm-add-item']",
-      title: "Add items from this project",
-      body: "Pick any SKU that belongs to this project. Each added item gets a unique barcode.",
+      title: 'Add items from this project',
+      body: 'Pick any SKU that belongs to this project. Each added item gets a unique barcode.',
     },
     {
       selector: "[data-tour='first-item']",
-      title: "Printable barcodes",
-      body: "These barcodes print directly. Stick them on the physical goods before shipping.",
+      title: 'Printable barcodes',
+      body: 'These barcodes print directly. Stick them on the physical goods before shipping.',
     },
     {
       selector: "[data-tour='pm-print']",
-      title: "Print them all at once",
-      body: "Hit Print barcodes to generate a clean, printer-friendly sheet for every item.",
+      title: 'Print them all at once',
+      body: 'Hit Print barcodes to generate a clean, printer-friendly sheet for every item.',
     },
   ];
 
@@ -304,13 +318,13 @@ function PmView({
     setBusy(true);
     try {
       const res = await fetch(`/api/orders/${order.id}/items`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ productId: productId.trim() }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Failed to add item");
-      setProductId("");
+      if (!res.ok) throw new Error(json.error ?? 'Failed to add item');
+      setProductId('');
       await refresh();
     } catch (err) {
       setError((err as Error).message);
@@ -321,11 +335,11 @@ function PmView({
 
   async function removeItem(itemId: string) {
     const res = await fetch(`/api/orders/${order.id}/items?itemId=${itemId}`, {
-      method: "DELETE",
+      method: 'DELETE',
     });
     if (!res.ok) {
       const json = await res.json().catch(() => ({}));
-      alert(json.error ?? "Failed to remove item");
+      alert(json.error ?? 'Failed to remove item');
       return;
     }
     await refresh();
@@ -335,15 +349,16 @@ function PmView({
     <div className="space-y-6">
       {canEdit && (
         <section className="card no-print p-6" data-tour="pm-add-item">
-          <h2 className="text-base font-semibold">
-            Add items to this order
-          </h2>
+          <h2 className="text-base font-semibold">Add items to this order</h2>
           <p className="mt-1 text-xs text-[color:var(--text-muted)]">
             Pick a SKU from this project. A unique printable barcode is
             generated automatically. You can add items until the first scan
             happens.
           </p>
-          <form onSubmit={addItem} className="mt-4 flex flex-col gap-2 sm:flex-row">
+          <form
+            onSubmit={addItem}
+            className="mt-4 flex flex-col gap-2 sm:flex-row"
+          >
             <select
               className="input"
               value={productId}
@@ -361,12 +376,12 @@ function PmView({
               className="btn btn-primary"
               disabled={busy || !productId.trim()}
             >
-              {busy ? "Adding…" : "Add item"}
+              {busy ? 'Adding…' : 'Add item'}
             </button>
           </form>
           {products.length === 0 && (
             <p className="mt-3 text-xs text-[color:var(--warning)]">
-              This project has no items yet.{" "}
+              This project has no items yet.{' '}
               <Link
                 href={`/projects/${order.projectId}`}
                 className="font-semibold text-[color:var(--primary)] underline"
@@ -388,18 +403,14 @@ function PmView({
         productByKey={productByKey}
         emptyHint={
           canEdit
-            ? "No items yet. Add a product above to generate its barcode."
-            : "No items on this order."
+            ? 'No items yet. Add a product above to generate its barcode.'
+            : 'No items on this order.'
         }
         showRemove={canEdit}
         onRemove={removeItem}
       />
 
-      <Tour
-        storageKey={`tour:pm:${order.id}`}
-        steps={tourSteps}
-        autoStart
-      />
+      <Tour storageKey={`tour:pm:${order.id}`} steps={tourSteps} autoStart />
     </div>
   );
 }
@@ -415,7 +426,7 @@ function InstallerView({
   refresh,
 }: {
   orderId: string;
-  items: OrderItem[];
+  items: OrderItemWithToken[];
   productByKey: Map<string, Product>;
   refresh: () => Promise<void>;
 }) {
@@ -427,12 +438,12 @@ function InstallerView({
     sku?: string;
   } | null>(null);
   const [flash, setFlash] = useState<
-    | { kind: "valid" | "duplicate"; itemId: string; at: number }
-    | { kind: "invalid"; itemId: null; at: number }
+    | { kind: 'valid' | 'duplicate'; itemId: string; at: number }
+    | { kind: 'invalid'; itemId: null; at: number }
     | null
   >(null);
   const [transportError, setTransportError] = useState<{
-    kind: "network" | "auth" | "server" | "conflict";
+    kind: 'network' | 'auth' | 'server' | 'conflict';
     message: string;
     at: number;
   } | null>(null);
@@ -465,15 +476,15 @@ function InstallerView({
       let result: ScanCallResult;
       try {
         const res = await fetch(`/api/orders/${orderId}/scan`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ barcode }),
         });
         let body: unknown;
         try {
           body = await res.json();
         } catch {
-          body = { error: "Server returned non-JSON response" };
+          body = { error: 'Server returned non-JSON response' };
         }
         result = classifyScanResponse(
           { ok: res.ok, status: res.status },
@@ -486,13 +497,13 @@ function InstallerView({
       }
 
       // Transport-level failures: never masquerade as a business outcome.
-      if (result.kind !== "outcome") {
+      if (result.kind !== 'outcome') {
         setTransportError({
           kind: result.kind,
           message: result.message,
           at: Date.now(),
         });
-        if (result.kind === "auth") {
+        if (result.kind === 'auth') {
           // Session expired — bounce to login with a return path.
           setTimeout(() => {
             const here = `/orders/${orderId}`;
@@ -510,37 +521,37 @@ function InstallerView({
         sku: result.stock?.sku,
       });
 
-      if (outcome.result === "valid") {
+      if (outcome.result === 'valid') {
         const item = itemById.get(outcome.itemId);
-        setFlash({ kind: "valid", itemId: outcome.itemId, at: Date.now() });
+        setFlash({ kind: 'valid', itemId: outcome.itemId, at: Date.now() });
         setFeed((f) => [
           {
             id: `${Date.now()}-v`,
-            kind: "valid",
-            productId: item?.productId ?? "(unknown)",
+            kind: 'valid',
+            productId: item?.productId ?? '(unknown)',
             barcode,
             stockAfter: result.stock?.stockQuantity,
             at: Date.now(),
           },
           ...f,
         ]);
-      } else if (outcome.result === "duplicate") {
+      } else if (outcome.result === 'duplicate') {
         const item = itemById.get(outcome.itemId);
-        setFlash({ kind: "duplicate", itemId: outcome.itemId, at: Date.now() });
+        setFlash({ kind: 'duplicate', itemId: outcome.itemId, at: Date.now() });
         setFeed((f) => [
           {
             id: `${Date.now()}-d`,
-            kind: "duplicate",
-            productId: item?.productId ?? "(unknown)",
+            kind: 'duplicate',
+            productId: item?.productId ?? '(unknown)',
             barcode,
             at: Date.now(),
           },
           ...f,
         ]);
       } else {
-        setFlash({ kind: "invalid", itemId: null, at: Date.now() });
+        setFlash({ kind: 'invalid', itemId: null, at: Date.now() });
         setFeed((f) => [
-          { id: `${Date.now()}-i`, kind: "invalid", barcode, at: Date.now() },
+          { id: `${Date.now()}-i`, kind: 'invalid', barcode, at: Date.now() },
           ...f,
         ]);
       }
@@ -557,23 +568,23 @@ function InstallerView({
   const tourSteps: TourStep[] = [
     {
       selector: "[data-tour='remaining']",
-      title: "Remaining items",
-      body: "This counter goes down every time you verify an item on the truck.",
+      title: 'Remaining items',
+      body: 'This counter goes down every time you verify an item on the truck.',
     },
     {
       selector: "[data-tour='scan-box']",
-      title: "Verify items here",
+      title: 'Verify items here',
       body: "Use your phone camera, a handheld scanner, or type/paste the barcode. A valid read instantly acknowledges the item and decrements the project's item stock.",
     },
     {
       selector: "[data-tour='pending']",
-      title: "Pending items",
-      body: "These items are still awaiting verification. A successful scan moves an item into Resolved.",
+      title: 'Pending items',
+      body: 'These items are still awaiting verification. A successful scan moves an item into Resolved.',
     },
     {
       selector: "[data-tour='resolved']",
-      title: "Resolved items",
-      body: "Verified deliveries live here — with who acknowledged them and when.",
+      title: 'Resolved items',
+      body: 'Verified deliveries live here — with who acknowledged them and when.',
     },
   ];
 
@@ -644,10 +655,10 @@ function InstallerView({
                     isTourAnchor={idx === 0}
                     flashing={
                       flash &&
-                      "itemId" in flash &&
+                      'itemId' in flash &&
                       flash.itemId === it.id &&
-                      flash.kind === "duplicate"
-                        ? "warn"
+                      flash.kind === 'duplicate'
+                        ? 'warn'
                         : null
                     }
                   />
@@ -676,14 +687,14 @@ function InstallerView({
                   const product = productByKey.get(it.productId);
                   const justScanned =
                     flash &&
-                    "itemId" in flash &&
+                    'itemId' in flash &&
                     flash.itemId === it.id &&
-                    flash.kind === "valid";
+                    flash.kind === 'valid';
                   return (
                     <li
                       key={it.id}
                       className={`flex items-center gap-3 px-6 py-3 text-sm ${
-                        justScanned ? "flash-scanned" : ""
+                        justScanned ? 'flash-scanned' : ''
                       }`}
                     >
                       <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[color:var(--success)] text-xs text-white">
@@ -698,7 +709,7 @@ function InstallerView({
                         </div>
                       </div>
                       <div className="text-right text-[10px] text-[color:var(--text-muted)]">
-                        <div>{it.scannedBy ?? "—"}</div>
+                        <div>{it.scannedBy ?? '—'}</div>
                         <div>{fmt(it.scannedAt)}</div>
                       </div>
                     </li>
@@ -734,21 +745,21 @@ function TrackCards({
 }) {
   const tiles = [
     {
-      label: "Total items",
+      label: 'Total items',
       value: total,
-      tone: "text-[color:var(--text)]",
+      tone: 'text-[color:var(--text)]',
     },
     {
-      label: "Resolved",
+      label: 'Resolved',
       value: resolved,
-      tone: "text-[color:var(--success)]",
+      tone: 'text-[color:var(--success)]',
     },
     {
-      label: "Remaining",
+      label: 'Remaining',
       value: remaining,
       tone: allDone
-        ? "text-[color:var(--success)]"
-        : "text-[color:var(--info)]",
+        ? 'text-[color:var(--success)]'
+        : 'text-[color:var(--info)]',
     },
   ];
   return (
@@ -765,7 +776,7 @@ function TrackCards({
       ))}
       {pendingScans > 0 && (
         <div className="col-span-3 text-[11px] text-[color:var(--text-muted)]">
-          Verifying {pendingScans} item{pendingScans === 1 ? "" : "s"}…
+          Verifying {pendingScans} item{pendingScans === 1 ? '' : 's'}…
         </div>
       )}
     </div>
@@ -784,9 +795,9 @@ function OrderResolvedCard({ total }: { total: number }) {
             Order resolved
           </div>
           <p className="text-sm text-[color:var(--text)]">
-            All {total} item{total === 1 ? "" : "s"} on this order have been
-            acknowledged. The project&apos;s item stock has been deducted
-            and the order is now marked as fulfilled.
+            All {total} item{total === 1 ? '' : 's'} on this order have been
+            acknowledged. The project&apos;s item stock has been deducted and
+            the order is now marked as fulfilled.
           </p>
         </div>
       </div>
@@ -803,31 +814,31 @@ function ScanOutcomeCard({
   sku?: string;
   stockAfter?: number;
 }) {
-  let classes = "";
-  if (outcome.result === "valid") {
-    classes = "border-[color:var(--success)] text-[color:var(--success)]";
-  } else if (outcome.result === "duplicate") {
-    classes = "border-[color:var(--warning)] text-[color:var(--warning)]";
+  let classes = '';
+  if (outcome.result === 'valid') {
+    classes = 'border-[color:var(--success)] text-[color:var(--success)]';
+  } else if (outcome.result === 'duplicate') {
+    classes = 'border-[color:var(--warning)] text-[color:var(--warning)]';
   } else {
-    classes = "border-[color:var(--danger)] text-[color:var(--danger)]";
+    classes = 'border-[color:var(--danger)] text-[color:var(--danger)]';
   }
   return (
     <div
       data-tour="scan-outcome"
       className={`card p-4 text-sm font-medium ${classes}`}
     >
-      {outcome.result === "valid" && (
+      {outcome.result === 'valid' && (
         <>
           ✓ Item acknowledged
-          {sku && typeof stockAfter === "number" && (
+          {sku && typeof stockAfter === 'number' && (
             <span className="ml-2 font-normal text-[color:var(--text-muted)]">
               — {sku} stock now {stockAfter}
             </span>
           )}
         </>
       )}
-      {outcome.result === "duplicate" && "↺ Already scanned earlier"}
-      {outcome.result === "invalid" &&
+      {outcome.result === 'duplicate' && '↺ Already scanned earlier'}
+      {outcome.result === 'invalid' &&
         `✗ Barcode not in this order: ${outcome.barcode}`}
     </div>
   );
@@ -837,21 +848,20 @@ function TransportErrorCard({
   error,
   onDismiss,
 }: {
-  error: { kind: "network" | "auth" | "server" | "conflict"; message: string };
+  error: { kind: 'network' | 'auth' | 'server' | 'conflict'; message: string };
   onDismiss: () => void;
 }) {
   const label: Record<typeof error.kind, string> = {
     network: "Can't reach the server",
-    auth: "Your session expired",
-    server: "Server error",
-    conflict: "Order conflict",
+    auth: 'Your session expired',
+    server: 'Server error',
+    conflict: 'Order conflict',
   };
   const hint: Record<typeof error.kind, string> = {
-    network: "Check your internet connection and try the scan again.",
-    auth: "Taking you back to the login screen…",
+    network: 'Check your internet connection and try the scan again.',
+    auth: 'Taking you back to the login screen…',
     server: "The scan wasn't recorded. Please retry — nothing was changed.",
-    conflict:
-      "Something about this order changed. The item was NOT deducted.",
+    conflict: 'Something about this order changed. The item was NOT deducted.',
   };
   return (
     <div
@@ -894,10 +904,10 @@ function ScanFeed({ entries }: { entries: FeedEntry[] }) {
       ) : (
         <ul className="max-h-80 overflow-y-auto divide-y divide-[color:var(--border)]">
           {entries.map((e) => {
-            const colorMap: Record<FeedEntry["kind"], string> = {
-              valid: "text-[color:var(--success)]",
-              duplicate: "text-[color:var(--warning)]",
-              invalid: "text-[color:var(--danger)]",
+            const colorMap: Record<FeedEntry['kind'], string> = {
+              valid: 'text-[color:var(--success)]',
+              duplicate: 'text-[color:var(--warning)]',
+              invalid: 'text-[color:var(--danger)]',
             };
             return (
               <li
@@ -905,17 +915,17 @@ function ScanFeed({ entries }: { entries: FeedEntry[] }) {
                 className="flex items-center gap-3 px-6 py-2 text-xs"
               >
                 <span className={`font-bold ${colorMap[e.kind]}`}>
-                  {e.kind === "valid" && "✓"}
-                  {e.kind === "duplicate" && "↺"}
-                  {e.kind === "invalid" && "✗"}
+                  {e.kind === 'valid' && '✓'}
+                  {e.kind === 'duplicate' && '↺'}
+                  {e.kind === 'invalid' && '✗'}
                 </span>
                 <span className="flex-1 font-mono">{e.barcode}</span>
-                {"productId" in e && (
+                {'productId' in e && (
                   <span className="text-[color:var(--text-muted)]">
                     {e.productId}
                   </span>
                 )}
-                {e.kind === "valid" && typeof e.stockAfter === "number" && (
+                {e.kind === 'valid' && typeof e.stockAfter === 'number' && (
                   <span className="text-[color:var(--text-muted)]">
                     stock: {e.stockAfter}
                   </span>
@@ -945,22 +955,23 @@ function ItemsGrid({
   flashItemId,
   flashKind,
 }: {
-  items: OrderItem[];
+  items: OrderItemWithToken[];
   productByKey: Map<string, Product>;
   emptyHint: string;
   showRemove?: boolean;
   onRemove?: (id: string) => void | Promise<void>;
   flashItemId?: string | null;
-  flashKind?: "valid" | "duplicate" | "invalid" | null;
+  flashKind?: 'valid' | 'duplicate' | 'invalid' | null;
 }) {
   return (
     <section className="card">
       <header className="flex items-center justify-between border-b border-[color:var(--border)] px-6 py-4">
         <div>
           <h2 className="text-base font-semibold">
-            Items{" "}
+            Items{' '}
             <span className="text-[color:var(--text-muted)]">
-              ({items.filter((i) => i.scannedAt !== null).length}/{items.length})
+              ({items.filter((i) => i.scannedAt !== null).length}/{items.length}
+              )
             </span>
           </h2>
           <p className="text-xs text-[color:var(--text-muted)]">
@@ -985,9 +996,9 @@ function ItemsGrid({
               isTourAnchor={idx === 0}
               flashing={
                 flashItemId === it.id
-                  ? flashKind === "duplicate"
-                    ? "warn"
-                    : "success"
+                  ? flashKind === 'duplicate'
+                    ? 'warn'
+                    : 'success'
                   : null
               }
             />
@@ -1008,15 +1019,21 @@ function ItemsGrid({
  * into the manual input) and is sized small + clearly labelled so a phone
  * camera doesn't latch onto it first and just spit out the bare token.
  */
-function ItemScanArt({ barcode }: { barcode: string }) {
-  const url = resolveScanUrl(barcode);
+function ItemScanArt({
+  barcode,
+  scanToken,
+}: {
+  barcode: string;
+  scanToken?: string;
+}) {
+  const url = resolveScanUrl(barcode, scanToken);
   // Show the URL host as a small "tap-to-open" affordance so installers
   // can sanity-check that the QR resolves to the right server.
-  let host = "";
+  let host = '';
   try {
     host = new URL(url).host;
   } catch {
-    host = "";
+    host = '';
   }
 
   return (
@@ -1073,12 +1090,12 @@ function ItemCard({
   isTourAnchor,
   flashing,
 }: {
-  item: OrderItem;
+  item: OrderItemWithToken;
   product?: Product;
   showRemove?: boolean;
   onRemove?: (id: string) => void | Promise<void>;
   isTourAnchor?: boolean;
-  flashing?: "success" | "warn" | null;
+  flashing?: 'success' | 'warn' | null;
 }) {
   const done = !!item.scannedAt;
   const cardRef = useRef<HTMLLIElement | null>(null);
@@ -1086,21 +1103,21 @@ function ItemCard({
   // Scroll the just-scanned card into view.
   useEffect(() => {
     if (flashing && cardRef.current) {
-      cardRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      cardRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
   }, [flashing]);
 
-  const flashClass = flashing === "warn" ? "flash-error" : "flash-scanned";
+  const flashClass = flashing === 'warn' ? 'flash-error' : 'flash-scanned';
 
   return (
     <li
       ref={cardRef}
-      data-tour={isTourAnchor ? "first-item" : undefined}
+      data-tour={isTourAnchor ? 'first-item' : undefined}
       className={`relative flex flex-col gap-3 rounded-xl border p-4 transition-colors ${
         done
-          ? "border-[color:var(--success)] bg-green-50/40"
-          : "border-[color:var(--border)] bg-[color:var(--surface)]"
-      } ${flashing ? flashClass : ""}`}
+          ? 'border-[color:var(--success)] bg-green-50/40'
+          : 'border-[color:var(--border)] bg-[color:var(--surface)]'
+      } ${flashing ? flashClass : ''}`}
     >
       <div className="flex items-start justify-between gap-2">
         <div>
@@ -1119,22 +1136,25 @@ function ItemCard({
           ) : (
             <span className="pill pill-draft">Awaiting</span>
           )}
-          {flashing === "success" && (
+          {flashing === 'success' && (
             <span className="pill pill-active">Just scanned</span>
           )}
-          {flashing === "warn" && (
+          {flashing === 'warn' && (
             <span className="pill pill-anomaly">Duplicate</span>
           )}
         </div>
       </div>
 
-      <ItemScanArt barcode={item.barcode} />
+      <ItemScanArt
+        barcode={item.barcode}
+        scanToken={item.printedScanToken}
+      />
 
       <div className="flex items-center justify-between text-[11px] text-[color:var(--text-muted)]">
         <span className="font-mono">{item.barcode}</span>
         {done && (
           <span>
-            {item.scannedBy ?? "—"} · {fmt(item.scannedAt)}
+            {item.scannedBy ?? '—'} · {fmt(item.scannedAt)}
           </span>
         )}
       </div>
@@ -1155,7 +1175,7 @@ function ReadOnlyItems({
   items,
   productByKey,
 }: {
-  items: OrderItem[];
+  items: OrderItemWithToken[];
   productByKey: Map<string, Product>;
 }) {
   return (

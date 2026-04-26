@@ -81,12 +81,18 @@ export async function executeScan({
       const matched = items.find((i) => i.id === outcome.itemId)!;
       sku = matched.productId;
 
+      // Synthetic "Printed sticker" actor isn't a real users row — its
+      // userId would violate the FK on scanned_by_id / stock_movements.
+      // Both columns are nullable so we just write null and rely on the
+      // human-readable `actor.name` for the audit trail.
+      const fkUserId = actor.isPrintedScan ? null : actor.userId;
+
       await tx
         .update(orderItems)
         .set({
           scannedAt: new Date(),
           scannedBy: actor.name,
-          scannedById: actor.userId,
+          scannedById: fkUserId,
         })
         .where(eq(orderItems.id, outcome.itemId));
 
@@ -110,7 +116,7 @@ export async function executeScan({
         reason: "order_scan",
         orderId,
         orderItemId: outcome.itemId,
-        userId: actor.userId,
+        userId: fkUserId,
       });
     }
 

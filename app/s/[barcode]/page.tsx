@@ -1,57 +1,111 @@
-import Link from "next/link";
-import { headers } from "next/headers";
-import { redirect } from "next/navigation";
-import { getCurrentUser } from "@/lib/auth-guard";
-import { runPageWithObservability } from "@/lib/observability/instrument";
-import { executeScan, findOrderByBarcode } from "@/lib/scan-execute";
-import type { ScanOutcome } from "@/lib/scan";
+import Link from 'next/link';
+import { headers } from 'next/headers';
+import { redirect } from 'next/navigation';
+import { getCurrentUser, type AuthenticatedActor } from '@/lib/auth-guard';
+import { getPrintedScanActor } from '@/lib/printed-scan-actor';
+import { verifyPrintedScanToken } from '@/lib/printed-scan-token';
+import { runPageWithObservability } from '@/lib/observability/instrument';
+import { executeScan, findOrderByBarcode } from '@/lib/scan-execute';
+import type { ScanOutcome } from '@/lib/scan';
 
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';
 
 /**
  * Deep-link scan endpoint.
  *
- * Intended flow: a PM prints a QR code encoding
- *   https://<app>/s/<barcode>
- * on each order item. An installer scans it with any phone camera → the
- * native camera app opens this URL → this server component:
- *   1. forces auth (redirects to /login?redirect=... if anonymous)
- *   2. locates the order the barcode belongs to
- *   3. runs the same transactional scan that the manual flow uses
- *   4. renders an outcome page with a link to the full order view
+ * The PM prints a QR code (and a fallback CODE128 strip) encoding
+ *   https://<app>/s/<barcode>?st=<signed-token>
+ * on each order item.
  *
- * No manual typing. No pasting. No knowing the order id.
+ * Two ways the request gets authorised:
+ *
+ *  A. **Printed-sticker token** (the zero-friction path used by 3rd-party
+ *     phone scanners like QR Bot). `?st=…` is signed against this server's
+ *     `SESSION_SECRET` and bound to the exact `barcode` in the URL path.
+ *     A valid token resolves the scan as a synthetic "Printed sticker"
+ *     actor — the installer never sees a login screen.
+ *
+ *  B. **Iron-session cookie** (the in-app path, also used as a fallback
+ *     when the token is missing/expired). If neither is present, we
+ *     bounce to `/login?redirect=…` so the installer signs in once and
+ *     comes right back.
+ *
+ * Either way the same transactional `executeScan` runs, decrementing
+ * stock and writing the audit row.
  */
 export default async function ScanDeepLinkPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ barcode: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const h = await headers();
-  return runPageWithObservability(h, () => scanDeepLinkInner(params));
+  return runPageWithObservability(h, () =>
+    scanDeepLinkInner(params, searchParams),
+  );
 }
 
-async function scanDeepLinkInner(params: Promise<{ barcode: string }>) {
+async function scanDeepLinkInner(
+  params: Promise<{ barcode: string }>,
+  searchParams: Promise<Record<string, string | string[] | undefined>>,
+) {
   const { barcode: raw } = await params;
   const barcode = decodeURIComponent(raw).trim();
+  const sp = await searchParams;
+  const tokenRaw = Array.isArray(sp.st) ? sp.st[0] : sp.st;
+  const token = typeof tokenRaw === 'string' ? tokenRaw.trim() : '';
 
-  const actor = await getCurrentUser();
+  // Resolve the scanning actor. The printed-sticker token is treated as
+  // primary: if it verifies against this exact barcode, the sticker
+  // itself authorises the scan (that's the whole point of the token —
+  // a 3rd-party phone scanner like QR Bot opens the URL in a browser
+  // that has no session and the scan must still go through).
+  //
+  // We only fall back to the iron-session cookie when no token was
+  // supplied at all, which preserves the original "installer signed
+  // in, opening /s/<barcode> directly" path.
+  let actor: AuthenticatedActor | null = null;
+  if (token) {
+    const verified = verifyPrintedScanToken(token, barcode);
+    if (verified.ok) {
+      actor = getPrintedScanActor();
+    }
+  }
+
   if (!actor) {
-    const to = `/s/${encodeURIComponent(barcode)}`;
-    redirect(`/login?redirect=${encodeURIComponent(to)}`);
+    const sessionActor = await getCurrentUser();
+    if (sessionActor && sessionActor.role === 'installer') {
+      actor = sessionActor;
+    } else if (sessionActor && sessionActor.role !== 'installer') {
+      // Signed-in PM hit a token-less URL: don't pretend it worked.
+      return (
+        <OutcomeShell
+          status="blocked"
+          title="Scans are installer-only"
+          body="Your account is a Project Manager. Only installer accounts can acknowledge deliveries. Ask your PM to log in as the installer that owns this route."
+        />
+      );
+    } else {
+      // Anonymous + no valid token → bounce to login, preserving the
+      // (possibly invalid) token so the user lands back here once they
+      // sign in.
+      const path = `/s/${encodeURIComponent(barcode)}`;
+      const to = token ? `${path}?st=${encodeURIComponent(token)}` : path;
+      redirect(`/login?redirect=${encodeURIComponent(to)}`);
+    }
   }
 
-  if (actor.role !== "installer") {
-    // PMs aren't allowed to "acknowledge" inventory — but don't surface a
-    // scary 403, just tell them why.
-    return (
-      <OutcomeShell
-        status="blocked"
-        title="Scans are installer-only"
-        body="Your account is a Project Manager. Only installer accounts can acknowledge deliveries. Ask your PM to log in as the installer that owns this route."
-      />
-    );
-  }
+  // The deep link was opened by a 3rd-party phone scanner (QR Bot etc.)
+  // when the actor is the synthetic Printed-sticker actor. Those phones
+  // typically have no session, so dropping them onto `/orders/{id}` —
+  // either via the "Open order" button, the Dashboard link, or the
+  // auto-redirect — would bounce them to /login and ruin the
+  // zero-friction promise. We hide the navigation row entirely for the
+  // token path and only keep the outcome card + a "you can close this
+  // tab" hint.
+  const isAnonymousPhoneScan = actor.isPrintedScan === true;
+  const hideNavigation = isAnonymousPhoneScan;
 
   const lookup = await findOrderByBarcode(barcode);
   if (!lookup) {
@@ -60,6 +114,7 @@ async function scanDeepLinkInner(params: Promise<{ barcode: string }>) {
         status="blocked"
         title="Unknown barcode"
         body={`The code ${barcode} isn't part of any order in this workspace. Double-check the sticker or ask your PM to rebuild the order.`}
+        hideNavigation={hideNavigation}
       />
     );
   }
@@ -70,34 +125,39 @@ async function scanDeepLinkInner(params: Promise<{ barcode: string }>) {
     actor,
   });
 
-  const orderHref = `/orders/${lookup.orderId}`;
+  const orderHref = isAnonymousPhoneScan
+    ? undefined
+    : `/orders/${lookup.orderId}`;
 
-  if (result.kind === "order_not_found") {
+  if (result.kind === 'order_not_found') {
     return (
       <OutcomeShell
         status="blocked"
         title="Order gone"
         body="This barcode's order was deleted after the label was printed. There's nothing to acknowledge."
+        hideNavigation={hideNavigation}
       />
     );
   }
-  if (result.kind === "order_fulfilled") {
+  if (result.kind === 'order_fulfilled') {
     return (
       <OutcomeShell
         status="done"
         title="Order already fulfilled"
         body={`Order "${lookup.projectName}" was already completed. Nothing was changed.`}
         orderHref={orderHref}
+        hideNavigation={hideNavigation}
       />
     );
   }
-  if (result.kind === "sku_deleted") {
+  if (result.kind === 'sku_deleted') {
     return (
       <OutcomeShell
         status="blocked"
         title="Project item missing"
         body={`SKU "${result.sku}" no longer exists in this project. The scan was rolled back. Ask a PM to recreate the item or rebuild the order.`}
         orderHref={orderHref}
+        hideNavigation={hideNavigation}
       />
     );
   }
@@ -109,6 +169,7 @@ async function scanDeepLinkInner(params: Promise<{ barcode: string }>) {
       orderHref={orderHref}
       stock={result.stock}
       progress={result.progress}
+      hideNavigation={hideNavigation}
     />
   );
 }
@@ -119,19 +180,21 @@ function OutcomeView({
   orderHref,
   stock,
   progress,
+  hideNavigation,
 }: {
   outcome: ScanOutcome;
   projectName: string;
-  orderHref: string;
+  orderHref?: string;
   stock?: { sku: string; stockQuantity: number };
   progress: { scanned: number; total: number; percent: number };
+  hideNavigation?: boolean;
 }) {
-  if (outcome.result === "valid") {
+  if (outcome.result === 'valid') {
     const done = progress.scanned === progress.total;
     return (
       <OutcomeShell
-        status={done ? "complete" : "ok"}
-        title={done ? "Order resolved" : "Item acknowledged"}
+        status={done ? 'complete' : 'ok'}
+        title={done ? 'Order resolved' : 'Item acknowledged'}
         body={
           done
             ? `Every item on "${projectName}" has been scanned. The order is now marked fulfilled and the project's item stock is up to date.`
@@ -139,18 +202,20 @@ function OutcomeView({
         }
         stock={stock}
         orderHref={orderHref}
-        autoOpen={!done}
+        autoOpen={!done && !!orderHref}
+        hideNavigation={hideNavigation}
       />
     );
   }
 
-  if (outcome.result === "duplicate") {
+  if (outcome.result === 'duplicate') {
     return (
       <OutcomeShell
         status="warn"
         title="Already scanned"
         body={`This item on "${projectName}" was already acknowledged earlier. Nothing was changed.`}
         orderHref={orderHref}
+        hideNavigation={hideNavigation}
       />
     );
   }
@@ -161,11 +226,12 @@ function OutcomeView({
       title="Not part of this order"
       body={`Barcode ${outcome.barcode} wasn't expected on "${projectName}". The order has been flagged as an anomaly for your PM to review.`}
       orderHref={orderHref}
+      hideNavigation={hideNavigation}
     />
   );
 }
 
-type OutcomeStatus = "ok" | "complete" | "warn" | "blocked" | "done";
+type OutcomeStatus = 'ok' | 'complete' | 'warn' | 'blocked' | 'done';
 
 function OutcomeShell({
   status,
@@ -174,6 +240,7 @@ function OutcomeShell({
   orderHref,
   stock,
   autoOpen,
+  hideNavigation,
 }: {
   status: OutcomeStatus;
   title: string;
@@ -181,32 +248,41 @@ function OutcomeShell({
   orderHref?: string;
   stock?: { sku: string; stockQuantity: number };
   autoOpen?: boolean;
+  /**
+   * For the printed-sticker (token) path: the installer has no session,
+   * so any internal link would bounce them to /login. Hide the entire
+   * nav row + auto-redirect when this is true.
+   */
+  hideNavigation?: boolean;
 }) {
-  const palette: Record<OutcomeStatus, { border: string; chip: string; icon: string }> = {
+  const palette: Record<
+    OutcomeStatus,
+    { border: string; chip: string; icon: string }
+  > = {
     ok: {
-      border: "border-[color:var(--success)]",
-      chip: "bg-[color:var(--success)] text-white",
-      icon: "✓",
+      border: 'border-[color:var(--success)]',
+      chip: 'bg-[color:var(--success)] text-white',
+      icon: '✓',
     },
     complete: {
-      border: "border-[color:var(--success)]",
-      chip: "bg-[color:var(--success)] text-white",
-      icon: "✓",
+      border: 'border-[color:var(--success)]',
+      chip: 'bg-[color:var(--success)] text-white',
+      icon: '✓',
     },
     done: {
-      border: "border-[color:var(--border)]",
-      chip: "bg-[color:var(--text-muted)] text-white",
-      icon: "✓",
+      border: 'border-[color:var(--border)]',
+      chip: 'bg-[color:var(--text-muted)] text-white',
+      icon: '✓',
     },
     warn: {
-      border: "border-[color:var(--warning)]",
-      chip: "bg-[color:var(--warning)] text-white",
-      icon: "↺",
+      border: 'border-[color:var(--warning)]',
+      chip: 'bg-[color:var(--warning)] text-white',
+      icon: '↺',
     },
     blocked: {
-      border: "border-[color:var(--danger)]",
-      chip: "bg-[color:var(--danger)] text-white",
-      icon: "!",
+      border: 'border-[color:var(--danger)]',
+      chip: 'bg-[color:var(--danger)] text-white',
+      icon: '!',
     },
   };
   const p = palette[status];
@@ -224,24 +300,30 @@ function OutcomeShell({
             <p className="mt-1 text-sm text-[color:var(--text)]">{body}</p>
             {stock && (
               <p className="mt-2 text-xs text-[color:var(--text-muted)]">
-                Project stock for{" "}
-                <span className="font-mono">{stock.sku}</span> is now{" "}
-                <strong>{stock.stockQuantity}</strong>.
+                Project stock for <span className="font-mono">{stock.sku}</span>{' '}
+                is now <strong>{stock.stockQuantity}</strong>.
               </p>
             )}
           </div>
         </div>
-        <div className="mt-6 flex flex-wrap gap-2">
-          {orderHref && (
-            <Link href={orderHref} className="btn btn-primary text-sm">
-              Open order
+        {!hideNavigation && (
+          <div className="mt-6 flex flex-wrap gap-2">
+            {orderHref && (
+              <Link href={orderHref} className="btn btn-primary text-sm">
+                Open order
+              </Link>
+            )}
+            <Link href="/" className="btn btn-ghost text-sm">
+              Dashboard
             </Link>
-          )}
-          <Link href="/" className="btn btn-ghost text-sm">
-            Dashboard
-          </Link>
-        </div>
-        {autoOpen && orderHref && (
+          </div>
+        )}
+        {hideNavigation && (
+          <p className="mt-6 text-center text-xs text-[color:var(--text-muted)]">
+            You can close this tab.
+          </p>
+        )}
+        {autoOpen && orderHref && !hideNavigation && (
           // Progressive enhancement: on success, auto-navigate to the order
           // page after a short delay so the installer sees the running list
           // of scans rather than sitting on a "scan one more" dead-end.

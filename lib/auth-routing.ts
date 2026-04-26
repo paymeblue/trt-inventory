@@ -13,13 +13,13 @@
  */
 
 const PUBLIC_PATHS = [
-  "/login",
-  "/forgot-password",
-  "/auth/handoff",
-  "/api/auth/login",
-  "/api/auth/logout",
-  "/api/auth/me",
-  "/api/auth/forgot-password",
+  '/login',
+  '/forgot-password',
+  '/auth/handoff',
+  '/api/auth/login',
+  '/api/auth/logout',
+  '/api/auth/me',
+  '/api/auth/forgot-password',
 ];
 
 export type AuthRoutingInput = {
@@ -30,36 +30,40 @@ export type AuthRoutingInput = {
 };
 
 export type AuthRoutingDecision =
-  | { kind: "next" }
-  | { kind: "unauthenticated-json" }
-  | { kind: "redirect"; pathname: string; search?: string };
+  | { kind: 'next' }
+  | { kind: 'unauthenticated-json' }
+  | { kind: 'redirect'; pathname: string; search?: string };
 
-export function decideAuthRouting(input: AuthRoutingInput): AuthRoutingDecision {
+export function decideAuthRouting(
+  input: AuthRoutingInput,
+): AuthRoutingDecision {
   const { pathname, search, hasSession, redirectParam } = input;
 
-  if (hasSession && pathname === "/login") {
-    const target = isSafeInternalRedirectPath(redirectParam) ? redirectParam : "/";
-    return { kind: "redirect", pathname: target, search: "" };
+  if (hasSession && pathname === '/login') {
+    const target = isSafeInternalRedirectPath(redirectParam)
+      ? redirectParam
+      : '/';
+    return { kind: 'redirect', pathname: target, search: '' };
   }
 
   if (
-    pathname.startsWith("/_next") ||
-    pathname.startsWith("/favicon") ||
+    pathname.startsWith('/_next') ||
+    pathname.startsWith('/favicon') ||
     isPublicPath(pathname)
   ) {
-    return { kind: "next" };
+    return { kind: 'next' };
   }
 
-  if (hasSession) return { kind: "next" };
+  if (hasSession) return { kind: 'next' };
 
-  if (pathname.startsWith("/api/")) {
-    return { kind: "unauthenticated-json" };
+  if (pathname.startsWith('/api/')) {
+    return { kind: 'unauthenticated-json' };
   }
 
-  const returnTo = pathname + (search ?? "");
+  const returnTo = pathname + (search ?? '');
   return {
-    kind: "redirect",
-    pathname: "/login",
+    kind: 'redirect',
+    pathname: '/login',
     search: `?redirect=${encodeURIComponent(returnTo)}`,
   };
 }
@@ -77,5 +81,5 @@ function isPublicPath(pathname: string): boolean {
 export function isSafeInternalRedirectPath(
   value: string | null,
 ): value is string {
-  return !!value && value.startsWith("/") && !value.startsWith("//");
+  return !!value && value.startsWith('/') && !value.startsWith('//');
 }
