@@ -69,6 +69,16 @@ type FeedEntry =
     }
   | { id: string; kind: 'invalid'; barcode: string; at: number };
 
+function orderHasPendingScansForPoll(data: DetailResponse | undefined) {
+  if (!data) return false;
+  return (
+    data.order.status !== 'fulfilled' &&
+    data.items.some(
+      (i) => i.scannedAt === null || i.scannedAt === undefined,
+    )
+  );
+}
+
 function fmt(ts: string | Date | null | undefined) {
   if (!ts) return '—';
   return new Date(ts).toLocaleString();
@@ -105,6 +115,10 @@ export default function OrderDetailPage({
 
   const { data, mutate, error, isLoading } = useSWR<DetailResponse>(
     `/api/orders/${id}`,
+    {
+      pollIntervalMs: 4000,
+      pollWhile: orderHasPendingScansForPoll,
+    },
   );
   // Scope the SKU picker / item lookups to the order's parent project —
   // SKUs are no longer globally unique, so fetching all products would

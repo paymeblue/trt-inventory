@@ -2,13 +2,26 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+export interface UseSWROptions<T> {
+  /** Fixed-interval polling (always on while the hook is mounted). */
+  refreshMs?: number;
+  /**
+   * Poll every `pollIntervalMs` only while this returns true for the latest
+   * `data`. Avoids a parent `useEffect` + `setState` just to toggle polling.
+   */
+  pollIntervalMs?: number;
+  pollWhile?: (data: T | undefined) => boolean;
+}
+
 /**
  * Tiny stand-in for SWR so we don't pull in an extra dependency for a
- * handful of fetches. Re-fetches on `mutate()` or on window focus.
+ * handful of fetches. Re-fetches on `mutate()`, window focus, tab
+ * visibility (so switching back from a phone-scan tab updates the page),
+ * and optional polling (`refreshMs` or `pollIntervalMs` + `pollWhile`).
  */
 export default function useSWR<T>(
   url: string | null,
-  options: { refreshMs?: number } = {},
+  options: UseSWROptions<T> = {},
 ): {
   data: T | undefined;
   error: Error | undefined;
@@ -39,19 +52,44 @@ export default function useSWR<T>(
 
   useEffect(() => {
     mounted.current = true;
-    void load();
+    const tick = requestAnimationFrame(() => {
+      void load();
+    });
+    return () => {
+      cancelAnimationFrame(tick);
+      mounted.current = false;
+    };
+  }, [load]);
+
+  useEffect(() => {
     const onFocus = () => void load();
     window.addEventListener("focus", onFocus);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [load]);
+
+  useEffect(() => {
     let iv: ReturnType<typeof setInterval> | undefined;
-    if (options.refreshMs) {
-      iv = setInterval(() => void load(), options.refreshMs);
+    const pollMs = options.pollIntervalMs ?? 0;
+    const fixedMs = options.refreshMs ?? 0;
+    const pollPred = options.pollWhile;
+    if (pollMs > 0 && pollPred) {
+      if (pollPred(data)) {
+        iv = setInterval(() => void load(), pollMs);
+      }
+    } else if (fixedMs > 0) {
+      iv = setInterval(() => void load(), fixedMs);
     }
     return () => {
-      mounted.current = false;
-      window.removeEventListener("focus", onFocus);
       if (iv) clearInterval(iv);
     };
-  }, [load, options.refreshMs]);
+  }, [load, data, options.refreshMs, options.pollIntervalMs, options.pollWhile]);
 
   return { data, error, isLoading, mutate: load };
 }
