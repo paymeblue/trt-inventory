@@ -161,6 +161,17 @@ async function scanDeepLinkInner(
       />
     );
   }
+  if (result.kind === 'insufficient_stock') {
+    return (
+      <OutcomeShell
+        status="blocked"
+        title="No stock left"
+        body={`SKU "${result.sku}" is already at zero on hand. The verification was not recorded. Ask a PM to restock this item on the project, then scan again.`}
+        orderHref={orderHref}
+        hideNavigation={hideNavigation}
+      />
+    );
+  }
 
   return (
     <OutcomeView

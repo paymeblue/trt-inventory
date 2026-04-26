@@ -1,24 +1,78 @@
 "use client";
 
+import {
+  BookOpenIcon,
+  ChevronDownIcon,
+  ClipboardDocumentListIcon,
+  FolderIcon,
+  LightBulbIcon,
+  PlusCircleIcon,
+  QrCodeIcon,
+  ScaleIcon,
+  Squares2X2Icon,
+  UserGroupIcon,
+} from "@heroicons/react/24/outline";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useState, type ComponentType, type SVGProps } from "react";
 import { useSession } from "./session-context";
 import type { Role } from "@/db/schema";
 
-const navMain: { href: string; label: string; icon: string; roles: Role[] }[] =
-  [
-    { href: "/", label: "Dashboard", icon: "◆", roles: ["pm", "installer"] },
-    { href: "/projects", label: "Projects", icon: "▥", roles: ["pm", "installer"] },
-    { href: "/orders", label: "Orders", icon: "▤", roles: ["pm", "installer"] },
-    { href: "/orders/new", label: "New Order", icon: "✚", roles: ["pm"] },
-    { href: "/scan", label: "Verify deliveries", icon: "⎚", roles: ["installer"] },
-    { href: "/team", label: "Team", icon: "◎", roles: ["pm"] },
-  ];
+type IconComponent = ComponentType<SVGProps<SVGSVGElement>>;
 
-const helpLinks: { href: string; label: string; icon: string }[] = [
-  { href: "/help", label: "How it works", icon: "?" },
-  { href: "/help/constraints", label: "Rules & constraints", icon: "≡" },
+function SidebarGlyph({ Icon }: { Icon: IconComponent }) {
+  return <Icon className="h-5 w-5 shrink-0" aria-hidden />;
+}
+
+type NavItem = {
+  href: string;
+  label: string;
+  Icon: IconComponent;
+  roles: Role[];
+};
+
+const navMain: NavItem[] = [
+  {
+    href: "/",
+    label: "Dashboard",
+    Icon: Squares2X2Icon,
+    roles: ["pm", "installer"],
+  },
+  {
+    href: "/projects",
+    label: "Projects",
+    Icon: FolderIcon,
+    roles: ["pm", "installer"],
+  },
+  {
+    href: "/orders",
+    label: "Orders",
+    Icon: ClipboardDocumentListIcon,
+    roles: ["pm", "installer"],
+  },
+  {
+    href: "/orders/new",
+    label: "New Order",
+    Icon: PlusCircleIcon,
+    roles: ["pm"],
+  },
+  {
+    href: "/scan",
+    label: "Verify deliveries",
+    Icon: QrCodeIcon,
+    roles: ["installer"],
+  },
+  {
+    href: "/team",
+    label: "Team",
+    Icon: UserGroupIcon,
+    roles: ["pm"],
+  },
+];
+
+const helpLinks: { href: string; label: string; Icon: IconComponent }[] = [
+  { href: "/help", label: "How it works", Icon: LightBulbIcon },
+  { href: "/help/constraints", label: "Rules & constraints", Icon: ScaleIcon },
 ];
 
 function helpLinkActive(pathname: string, href: string) {
@@ -62,6 +116,7 @@ export function Sidebar() {
             item.href === "/"
               ? pathname === "/"
               : pathname === item.href || pathname.startsWith(`${item.href}/`);
+          const { Icon } = item;
           return (
             <Link
               key={item.href}
@@ -72,7 +127,7 @@ export function Sidebar() {
                   : "text-[color:var(--text)] hover:bg-[color:var(--surface-muted)]"
               }`}
             >
-              <span className="w-5 text-center text-base">{item.icon}</span>
+              <SidebarGlyph Icon={Icon} />
               {item.label}
             </Link>
           );
@@ -91,18 +146,14 @@ export function Sidebar() {
             id="sidebar-help-trigger"
             onClick={() => setHelpOpen((o) => !o)}
           >
-            <span className="flex items-center gap-2">
-              <span className="w-5 text-center text-base" aria-hidden>
-                ?
-              </span>
-              Help & documentation
+            <span className="flex min-w-0 items-center gap-2">
+              <SidebarGlyph Icon={BookOpenIcon} />
+              <span className="truncate">Help & documentation</span>
             </span>
-            <span
-              className={`text-xs text-[color:var(--text-muted)] transition-transform ${helpOpen ? "rotate-180" : ""}`}
+            <ChevronDownIcon
+              className={`h-4 w-4 shrink-0 text-[color:var(--text-muted)] transition-transform ${helpOpen ? "rotate-180" : ""}`}
               aria-hidden
-            >
-              ▼
-            </span>
+            />
           </button>
           {helpOpen ? (
             <div
@@ -113,6 +164,7 @@ export function Sidebar() {
             >
               {helpLinks.map((item) => {
                 const active = helpLinkActive(pathname, item.href);
+                const { Icon } = item;
                 return (
                   <Link
                     key={item.href}
@@ -123,7 +175,7 @@ export function Sidebar() {
                         : "text-[color:var(--text)] hover:bg-[color:var(--surface)]"
                     }`}
                   >
-                    <span className="w-5 text-center text-base">{item.icon}</span>
+                    <SidebarGlyph Icon={Icon} />
                     {item.label}
                   </Link>
                 );

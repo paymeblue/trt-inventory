@@ -43,6 +43,13 @@
       "when": 1777612900000,
       "tag": "0005_product_min_stock_one",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1777613000000,
+      "tag": "0006_clamp_negative_product_stock",
+      "breakpoints": true
     }
   ]
 }

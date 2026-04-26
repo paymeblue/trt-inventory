@@ -38,6 +38,12 @@ async function handlePost(
         `Item SKU "${result.sku}" no longer exists in this project. Recreate it or rebuild the order.`,
       );
     }
+    if (result.kind === "insufficient_stock") {
+      return jsonError(
+        409,
+        `No on-hand stock left for SKU "${result.sku}". Add stock on the project before verifying this line.`,
+      );
+    }
 
     return NextResponse.json({
       outcome: result.outcome,

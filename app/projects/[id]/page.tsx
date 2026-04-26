@@ -201,7 +201,7 @@ function ItemsSection({
           <h2 className="text-base font-semibold">Items</h2>
           <p className="text-xs text-[color:var(--text-muted)]">
             Unique to this project. Starting stock is at least 1; PM adjustments
-            cannot go below 1 (delivery scans can still reduce on-hand stock).
+            cannot go below 1. Verifications cannot reduce on-hand stock below 0.
           </p>
         </div>
       </header>

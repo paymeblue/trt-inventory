@@ -410,7 +410,7 @@ function sceneInventory(): SceneDef["skeleton"] {
       backgroundColor: "#fff7ed",
       label: {
         text:
-          "Each successful verify: stock_quantity -= 1 (project scope).\nIf verifications exceed configured stock → quantity can go negative; dashboard shows a warning banner.",
+          "Each successful verify: stock_quantity -= 1 (project scope).\nIf on-hand is already 0, the verify is rejected — stock never goes negative.",
         fontSize: FONT_SM,
       },
     },

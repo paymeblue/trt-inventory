@@ -142,9 +142,10 @@ export default function HelpConstraintsPage() {
             all apply to the same row.
           </li>
           <li>
-            <strong className="text-[color:var(--text)]">Negative stock:</strong>{" "}
-            If verifications exceed configured stock, quantities can go negative;
-            the dashboard warns when any SKU is below zero.
+            <strong className="text-[color:var(--text)]">Stock floor:</strong>{" "}
+            On-hand quantity never goes below 0. If a line would decrement past
+            zero, the verification is rejected (HTTP 409) and the order line stays
+            unverified until a PM adds stock on the project.
           </li>
           <li>
             <strong className="text-[color:var(--text)]">Order lifecycle:</strong>{" "}

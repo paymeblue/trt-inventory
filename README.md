@@ -61,7 +61,7 @@ DB-enforced invariants:
 
 | Scan        | Meaning                                          | Effect                                                   |
 | ----------- | ------------------------------------------------ | -------------------------------------------------------- |
-| `valid`     | barcode matches an unscanned item                | item marked received **and** `stock_quantity -= 1` in tx |
+| `valid`     | barcode matches an unscanned item                | item marked received **and** `stock_quantity -= 1` in tx (only if stock ≥ 1; otherwise 409) |
 | `duplicate` | barcode matches an already-scanned item          | silently ignored — no double count, no double decrement  |
 | `invalid`   | barcode not found in the order                   | order flipped to `anomaly`, stock untouched              |
 

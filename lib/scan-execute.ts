@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, gte, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   orderItems,
@@ -15,7 +15,8 @@ import type { AuthenticatedActor } from "@/lib/auth-guard";
 export type ScanExecuteError =
   | { kind: "order_not_found" }
   | { kind: "order_fulfilled" }
-  | { kind: "sku_deleted"; sku: string };
+  | { kind: "sku_deleted"; sku: string }
+  | { kind: "insufficient_stock"; sku: string };
 
 export interface ScanExecuteSuccess {
   kind: "ok";
@@ -41,6 +42,8 @@ export type ScanExecuteResult = ScanExecuteSuccess | ScanExecuteError;
  *      otherwise decrement the wrong warehouse.
  *   4. Item scan + stock decrement + stock_movements audit row all
  *      commit atomically, or none of them do.
+ *   5. Stock never drops below 0: if on-hand quantity is already 0, the
+ *      verification is rejected (no order_item update, no movement).
  */
 export async function executeScan({
   orderId,
@@ -87,6 +90,32 @@ export async function executeScan({
       // human-readable `actor.name` for the audit trail.
       const fkUserId = actor.isPrintedScan ? null : actor.userId;
 
+      const [prodRow] = await tx
+        .update(products)
+        .set({ stockQuantity: sql`${products.stockQuantity} - 1` })
+        .where(
+          and(
+            eq(products.projectId, order.projectId),
+            eq(products.sku, sku),
+            gte(products.stockQuantity, 1),
+          ),
+        )
+        .returning({ stock: products.stockQuantity, id: products.id });
+
+      if (!prodRow) {
+        const exists = await tx.query.products.findFirst({
+          where: and(
+            eq(products.projectId, order.projectId),
+            eq(products.sku, sku),
+          ),
+          columns: { id: true },
+        });
+        if (!exists) return { kind: "sku_deleted", sku };
+        return { kind: "insufficient_stock", sku };
+      }
+
+      stockAfter = prodRow.stock;
+
       await tx
         .update(orderItems)
         .set({
@@ -96,20 +125,6 @@ export async function executeScan({
         })
         .where(eq(orderItems.id, outcome.itemId));
 
-      const [prodRow] = await tx
-        .update(products)
-        .set({ stockQuantity: sql`${products.stockQuantity} - 1` })
-        .where(
-          and(
-            eq(products.projectId, order.projectId),
-            eq(products.sku, sku),
-          ),
-        )
-        .returning({ stock: products.stockQuantity, id: products.id });
-
-      if (!prodRow) return { kind: "sku_deleted", sku };
-
-      stockAfter = prodRow.stock;
       await tx.insert(stockMovements).values({
         productId: prodRow.id,
         delta: -1,
