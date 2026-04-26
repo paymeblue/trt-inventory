@@ -1,10 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
-import { desc, eq } from "drizzle-orm";
+import { asc, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { orders, projects } from "@/db/schema";
+import { orders, products, projects } from "@/db/schema";
 import { requireUser } from "@/lib/auth-guard";
 import { handleError, jsonError } from "@/lib/api";
+import { insertOrderItemLine } from "@/lib/order-item-line";
 
 const createOrderSchema = z.object({
   projectId: z.string().uuid("projectId must be a UUID"),
@@ -49,9 +50,10 @@ export async function GET() {
 }
 
 /**
- * POST /api/orders → create an empty order under a given project.
- * PM-only. The project must exist; the order inherits the project's
- * item scope for later barcode operations.
+ * POST /api/orders → create an order for a project and **seed every current
+ * project SKU** as an order line (unique barcode each). An order is a
+ * dispatched snapshot of the project; PMs can still remove lines or add
+ * newly-created SKUs until the first scan (same rules as POST …/items).
  */
 export async function POST(req: NextRequest) {
   const auth = await requireUser("pm");
@@ -64,15 +66,28 @@ export async function POST(req: NextRequest) {
     });
     if (!project) return jsonError(404, "Project not found");
 
-    const [row] = await db
-      .insert(orders)
-      .values({
-        projectId,
-        createdBy: auth.actor.name,
-        createdById: auth.actor.userId,
-        status: "active",
-      })
-      .returning();
+    const row = await db.transaction(async (tx) => {
+      const [orderRow] = await tx
+        .insert(orders)
+        .values({
+          projectId,
+          createdBy: auth.actor.name,
+          createdById: auth.actor.userId,
+          status: "active",
+        })
+        .returning();
+
+      const prods = await tx.query.products.findMany({
+        where: eq(products.projectId, projectId),
+        orderBy: [asc(products.sku)],
+      });
+
+      for (const p of prods) {
+        await insertOrderItemLine(tx, orderRow.id, p.sku);
+      }
+
+      return orderRow;
+    });
 
     return NextResponse.json({ order: row, project }, { status: 201 });
   } catch (err) {

@@ -1,6 +1,14 @@
 'use client';
 
-import { use, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  use,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import useSWR from '@/lib/swr';
@@ -291,8 +299,8 @@ function PmView({
     },
     {
       selector: "[data-tour='pm-add-item']",
-      title: 'Add items from this project',
-      body: 'Pick any SKU that belongs to this project. Each added item gets a unique barcode.',
+      title: 'Adjust line items',
+      body: 'The order started with every project SKU. Remove lines you are not shipping, or add SKUs you created on the project after this order was opened.',
     },
     {
       selector: "[data-tour='first-item']",
@@ -349,11 +357,11 @@ function PmView({
     <div className="space-y-6">
       {canEdit && (
         <section className="card no-print p-6" data-tour="pm-add-item">
-          <h2 className="text-base font-semibold">Add items to this order</h2>
+          <h2 className="text-base font-semibold">Adjust items on this order</h2>
           <p className="mt-1 text-xs text-[color:var(--text-muted)]">
-            Pick a SKU from this project. A unique printable barcode is
-            generated automatically. You can add items until the first scan
-            happens.
+            New orders include every SKU from the project. Add any SKUs you
+            created later, or leave this section alone. You can remove lines
+            until the first scan.
           </p>
           <form
             onSubmit={addItem}
@@ -365,7 +373,7 @@ function PmView({
               onChange={(e) => setProductId(e.target.value)}
               required
             >
-              <option value="">— Select a project item —</option>
+              <option value="">— Add another project SKU —</option>
               {available.map((p) => (
                 <option key={p.id} value={p.sku}>
                   {p.sku} — {p.name} (stock: {p.stockQuantity})
@@ -390,6 +398,12 @@ function PmView({
               </Link>
             </p>
           )}
+          {available.length === 0 && products.length > 0 && (
+            <p className="mt-3 text-xs text-[color:var(--text-muted)]">
+              Every project SKU is already on this order. Remove a line if you
+              are not shipping it, or add new SKUs on the project page first.
+            </p>
+          )}
           {error && (
             <div className="mt-3 rounded-lg border border-[color:var(--danger)] bg-red-50 px-3 py-2 text-xs text-[color:var(--danger)]">
               {error}
@@ -403,7 +417,7 @@ function PmView({
         productByKey={productByKey}
         emptyHint={
           canEdit
-            ? 'No items yet. Add a product above to generate its barcode.'
+            ? 'No lines on this order yet — this project had no SKUs when the order was created. Add items on the project, then use the dropdown above.'
             : 'No items on this order.'
         }
         showRemove={canEdit}
@@ -614,7 +628,11 @@ function InstallerView({
 
           {!allDone && (
             <div data-tour="scan-box">
-              <ScanInput onScan={onScan} disabled={allDone} />
+              <ScanInput
+                onScan={onScan}
+                disabled={allDone}
+                busy={pendingScans > 0}
+              />
             </div>
           )}
 
@@ -626,7 +644,7 @@ function InstallerView({
             />
           )}
 
-          <ScanFeed entries={feed} />
+          <ScanFeed entries={feed} busy={pendingScans > 0} />
         </div>
 
         {/* Right column: pending + resolved lists */}
@@ -775,8 +793,18 @@ function TrackCards({
         </div>
       ))}
       {pendingScans > 0 && (
-        <div className="col-span-3 text-[11px] text-[color:var(--text-muted)]">
-          Verifying {pendingScans} item{pendingScans === 1 ? '' : 's'}…
+        <div
+          className="col-span-3 flex items-center gap-2 rounded-lg border border-[color:var(--border)] bg-[color:var(--surface-muted)] px-3 py-2 text-xs text-[color:var(--text)]"
+          role="status"
+          aria-live="polite"
+        >
+          <span
+            className="inline-block size-3.5 shrink-0 animate-spin rounded-full border-2 border-[color:var(--primary)] border-t-transparent"
+            aria-hidden
+          />
+          <span>
+            Verifying {pendingScans} item{pendingScans === 1 ? '' : 's'}…
+          </span>
         </div>
       )}
     </div>
@@ -891,53 +919,85 @@ function TransportErrorCard({
   );
 }
 
-function ScanFeed({ entries }: { entries: FeedEntry[] }) {
+function ScanFeed({
+  entries,
+  busy,
+}: {
+  entries: FeedEntry[];
+  busy?: boolean;
+}) {
+  let body: ReactNode;
+  if (entries.length === 0 && !busy) {
+    body = (
+      <div className="px-6 py-8 text-center text-xs text-[color:var(--text-muted)]">
+        No verifications yet. Scan a barcode to begin.
+      </div>
+    );
+  } else if (entries.length === 0) {
+    body = (
+      <div className="px-6 py-6 text-center text-xs text-[color:var(--text-muted)]">
+        Results will appear here as soon as the server responds.
+      </div>
+    );
+  } else {
+    body = (
+      <ul className="max-h-80 overflow-y-auto divide-y divide-[color:var(--border)]">
+        {entries.map((e) => {
+          const colorMap: Record<FeedEntry['kind'], string> = {
+            valid: 'text-[color:var(--success)]',
+            duplicate: 'text-[color:var(--warning)]',
+            invalid: 'text-[color:var(--danger)]',
+          };
+          return (
+            <li
+              key={e.id}
+              className="flex items-center gap-3 px-6 py-2 text-xs"
+            >
+              <span className={`font-bold ${colorMap[e.kind]}`}>
+                {e.kind === 'valid' && '✓'}
+                {e.kind === 'duplicate' && '↺'}
+                {e.kind === 'invalid' && '✗'}
+              </span>
+              <span className="flex-1 font-mono">{e.barcode}</span>
+              {'productId' in e && (
+                <span className="text-[color:var(--text-muted)]">
+                  {e.productId}
+                </span>
+              )}
+              {e.kind === 'valid' && typeof e.stockAfter === 'number' && (
+                <span className="text-[color:var(--text-muted)]">
+                  stock: {e.stockAfter}
+                </span>
+              )}
+              <span className="text-[color:var(--text-muted)]">
+                {new Date(e.at).toLocaleTimeString()}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    );
+  }
+
   return (
     <div className="card">
       <div className="border-b border-[color:var(--border)] px-6 py-3 text-sm font-semibold">
         Verification log
       </div>
-      {entries.length === 0 ? (
-        <div className="px-6 py-8 text-center text-xs text-[color:var(--text-muted)]">
-          No verifications yet. Scan a barcode to begin.
+      {busy && (
+        <div
+          className="flex items-center gap-2 border-b border-[color:var(--border)] bg-[color:var(--surface-muted)] px-6 py-3 text-xs text-[color:var(--text)]"
+          role="status"
+          aria-live="polite"
+        >
+          <span
+            className="inline-block size-3.5 shrink-0 animate-spin rounded-full border-2 border-[color:var(--primary)] border-t-transparent"
+            aria-hidden
+          />
+          <span>Recording this verification…</span>
         </div>
-      ) : (
-        <ul className="max-h-80 overflow-y-auto divide-y divide-[color:var(--border)]">
-          {entries.map((e) => {
-            const colorMap: Record<FeedEntry['kind'], string> = {
-              valid: 'text-[color:var(--success)]',
-              duplicate: 'text-[color:var(--warning)]',
-              invalid: 'text-[color:var(--danger)]',
-            };
-            return (
-              <li
-                key={e.id}
-                className="flex items-center gap-3 px-6 py-2 text-xs"
-              >
-                <span className={`font-bold ${colorMap[e.kind]}`}>
-                  {e.kind === 'valid' && '✓'}
-                  {e.kind === 'duplicate' && '↺'}
-                  {e.kind === 'invalid' && '✗'}
-                </span>
-                <span className="flex-1 font-mono">{e.barcode}</span>
-                {'productId' in e && (
-                  <span className="text-[color:var(--text-muted)]">
-                    {e.productId}
-                  </span>
-                )}
-                {e.kind === 'valid' && typeof e.stockAfter === 'number' && (
-                  <span className="text-[color:var(--text-muted)]">
-                    stock: {e.stockAfter}
-                  </span>
-                )}
-                <span className="text-[color:var(--text-muted)]">
-                  {new Date(e.at).toLocaleTimeString()}
-                </span>
-              </li>
-            );
-          })}
-        </ul>
       )}
+      {body}
     </div>
   );
 }

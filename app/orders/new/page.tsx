@@ -17,9 +17,9 @@ interface ProjectsResponse {
 }
 
 /**
- * PM creates a new order by picking an existing project. The order
- * inherits the project's item scope — no items from other projects
- * can ever be added to it.
+ * PM creates a new order by picking an existing project. Every SKU on
+ * that project is copied onto the order immediately (dispatch snapshot).
+ * The order stays scoped to that project only.
  *
  * Accepts `?projectId=` in the URL so the project detail page can
  * deep-link the PM straight into a pre-selected project.
@@ -86,9 +86,10 @@ export default function NewOrderPage() {
       <div>
         <h1 className="text-2xl font-semibold">New order</h1>
         <p className="text-sm text-[color:var(--text-muted)]">
-          Pick the project this delivery belongs to. On the next screen you&apos;ll
-          choose which of the project&apos;s items to include, print their barcodes,
-          and hand the order off to an installer.
+          Pick the project this delivery belongs to. All of that project&apos;s
+          items are added to the order right away with printable barcodes. On the
+          next screen you can remove lines or add new SKUs until the first scan,
+          then hand off to an installer.
         </p>
       </div>
 
@@ -117,9 +118,9 @@ export default function NewOrderPage() {
 
         {selected && selected.itemCount === 0 && (
           <div className="rounded-lg border border-[color:var(--warning)] bg-amber-50 px-3 py-2 text-xs text-[color:var(--warning)]">
-            This project has no items yet. You can still create the order, but
-            you&apos;ll need to add items to the project before anything is
-            scannable.{" "}
+            This project has no SKUs yet. The order will be empty until you add
+            items to the project (or add lines from the order page after you
+            create SKUs).{" "}
             <Link
               href={`/projects/${selected.id}`}
               className="font-semibold underline"

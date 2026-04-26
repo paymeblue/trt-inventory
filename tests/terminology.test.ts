@@ -38,8 +38,11 @@ describe("installer-facing terminology", () => {
 
   it("manual input button says 'Verify' not 'Scan'", () => {
     const src = load("components/scan-input.tsx");
-    // Look for the submit button label specifically.
-    expect(src).toMatch(/>\s*Verify\s*</);
+    // Idle label is the string child "Verify"; while a request is in flight
+    // it shows "Verifying…" inside a span.
+    expect(src).toContain('"Verify"');
+    expect(src).toContain("Verifying…");
+    expect(src).not.toMatch(/type="submit"[^>]*>[\s\n]*Scan\s*</);
   });
 
   it("order page shows a 'Verification log' header", () => {

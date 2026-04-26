@@ -4,7 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { orderItems, orders, products } from "@/db/schema";
 import { requireUser } from "@/lib/auth-guard";
-import { generateBarcode } from "@/lib/barcode";
+import { insertOrderItemLine } from "@/lib/order-item-line";
 import { handleError, jsonError } from "@/lib/api";
 
 const addItemSchema = z.object({
@@ -64,32 +64,18 @@ export async function POST(
       return jsonError(409, `SKU "${productId}" is already in this order`);
     }
 
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const barcode = generateBarcode();
-      try {
-        const [row] = await db
-          .insert(orderItems)
-          .values({ orderId: id, productId, barcode })
-          .returning();
-        return NextResponse.json(
-          {
-            item: row,
-            product: {
-              sku: product.sku,
-              name: product.name,
-              stockQuantity: product.stockQuantity,
-            },
-          },
-          { status: 201 },
-        );
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes("order_items_barcode_unique")) continue;
-        throw err;
-      }
-    }
-
-    return jsonError(500, "Failed to generate a unique barcode");
+    const [row] = await insertOrderItemLine(db, id, productId);
+    return NextResponse.json(
+      {
+        item: row,
+        product: {
+          sku: product.sku,
+          name: product.name,
+          stockQuantity: product.stockQuantity,
+        },
+      },
+      { status: 201 },
+    );
   } catch (err) {
     return handleError(err);
   }
