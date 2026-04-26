@@ -18,7 +18,15 @@ export default function HelpPage() {
         <h1 className="text-2xl font-semibold">How it works</h1>
         <p className="text-sm text-[color:var(--text-muted)]">
           Stupid-simple walk-throughs for project managers and installers.
-          Pick your role and follow the steps.
+          Pick your role and follow the steps. For enforced API and inventory
+          rules, see{" "}
+          <Link
+            href="/help/constraints"
+            className="font-semibold text-[color:var(--primary)] hover:underline"
+          >
+            Rules & constraints
+          </Link>
+          .
         </p>
       </div>
 

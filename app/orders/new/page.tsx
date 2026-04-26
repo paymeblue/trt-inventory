@@ -6,6 +6,9 @@ import { useEffect, useState } from "react";
 import useSWR from "@/lib/swr";
 import { useAuthedUser } from "@/components/session-context";
 
+const NEW_ORDER_PROJECT_BLOCKED_MSG =
+  "That project already has verified items or a fulfilled order and cannot receive another order. Create a new project for the next dispatch.";
+
 interface ProjectSummary {
   id: string;
   name: string;
@@ -28,7 +31,9 @@ export default function NewOrderPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const user = useAuthedUser();
-  const { data, isLoading } = useSWR<ProjectsResponse>("/api/projects");
+  const { data, isLoading } = useSWR<ProjectsResponse>(
+    "/api/projects?forNewOrder=1",
+  );
   const [projectId, setProjectId] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,6 +42,18 @@ export default function NewOrderPage() {
     const pre = searchParams?.get("projectId");
     if (pre) setProjectId(pre);
   }, [searchParams]);
+
+  useEffect(() => {
+    if (isLoading || !data) return;
+    if (!projectId) return;
+    const allowed = data.projects.some((p) => p.id === projectId);
+    if (!allowed) {
+      setProjectId("");
+      setError(NEW_ORDER_PROJECT_BLOCKED_MSG);
+      return;
+    }
+    setError((e) => (e === NEW_ORDER_PROJECT_BLOCKED_MSG ? null : e));
+  }, [isLoading, data, projectId]);
 
   if (!user) return null;
   const { role } = user;
@@ -86,10 +103,12 @@ export default function NewOrderPage() {
       <div>
         <h1 className="text-2xl font-semibold">New order</h1>
         <p className="text-sm text-[color:var(--text-muted)]">
-          Pick the project this delivery belongs to. All of that project&apos;s
-          items are added to the order right away with printable barcodes. On the
-          next screen you can remove lines or add new SKUs until the first scan,
-          then hand off to an installer.
+          Pick the project this delivery belongs to. Only projects with no
+          fulfilled orders and no verified items yet are listed — that avoids a
+          second dispatch draining stock twice. All of that project&apos;s items
+          are added to the order right away with printable barcodes. On the next
+          screen you can remove lines or add new SKUs until the first scan, then
+          hand off to an installer.
         </p>
       </div>
 

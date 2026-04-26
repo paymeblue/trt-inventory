@@ -37,6 +37,8 @@ interface ProjectDetailResponse {
   project: Project;
   items: Item[];
   orders: OrderLite[];
+  /** When false, PM must not create another order on this project (API-enforced). */
+  eligibleForNewOrder?: boolean;
 }
 
 /**
@@ -73,6 +75,7 @@ export default function ProjectDetailPage() {
   }
 
   const { project, items, orders } = data;
+  const eligibleForNewOrder = data.eligibleForNewOrder !== false;
 
   async function confirmDeleteProject() {
     setDeleteProjectBusy(true);
@@ -116,12 +119,22 @@ export default function ProjectDetailPage() {
         </div>
         {isPm && (
           <div className="flex flex-wrap gap-2 self-start">
-            <Link
-              href={`/orders/new?projectId=${project.id}`}
-              className="btn btn-primary"
-            >
-              + New order
-            </Link>
+            {eligibleForNewOrder ? (
+              <Link
+                href={`/orders/new?projectId=${project.id}`}
+                className="btn btn-primary"
+              >
+                + New order
+              </Link>
+            ) : (
+              <span
+                className="btn btn-primary cursor-not-allowed opacity-60"
+                title="This project already has verified items or a fulfilled order. Create a new project for another dispatch."
+                aria-disabled
+              >
+                + New order
+              </span>
+            )}
             <button
               type="button"
               onClick={() => setDeleteProjectOpen(true)}

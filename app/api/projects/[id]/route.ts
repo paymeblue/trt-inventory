@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { orders, products, projects } from "@/db/schema";
 import { requireUser } from "@/lib/auth-guard";
 import { handleError, jsonError } from "@/lib/api";
+import { isProjectEligibleForNewOrder } from "@/lib/project-new-order-eligibility";
 
 const updateSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
@@ -41,7 +42,14 @@ export async function GET(
         .orderBy(asc(orders.createdAt)),
     ]);
 
-    return NextResponse.json({ project, items, orders: projectOrders });
+    const eligibleForNewOrder = await isProjectEligibleForNewOrder(id);
+
+    return NextResponse.json({
+      project,
+      items,
+      orders: projectOrders,
+      eligibleForNewOrder,
+    });
   } catch (err) {
     return handleError(err);
   }

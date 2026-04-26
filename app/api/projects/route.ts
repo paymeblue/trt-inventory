@@ -14,6 +14,7 @@ import {
   createProjectBodySchema,
   findDuplicateSkuInPayload,
 } from "@/lib/project-validation";
+import { findProjectIdsBlockedForNewOrder } from "@/lib/project-new-order-eligibility";
 import { enrichProjectsWithRollups } from "@/lib/projects-rollup";
 
 /**
@@ -21,11 +22,17 @@ import { enrichProjectsWithRollups } from "@/lib/projects-rollup";
  * active orders, fulfilled orders) for the list page. Available to any
  * authenticated user — installers may need to see projects they have
  * deliveries under.
+ *
+ * Query: `?forNewOrder=1` — only projects that may receive a new order
+ * (no fulfilled orders and no verified/scanned lines on any order).
  */
-export async function GET() {
+export async function GET(req: NextRequest) {
   const auth = await requireUser();
   if ("error" in auth) return auth.error;
   try {
+    const forNewOrder =
+      req.nextUrl.searchParams.get("forNewOrder") === "1" ||
+      req.nextUrl.searchParams.get("forNewOrder") === "true";
     const [projectRows, itemRollups, orderRollups] = await Promise.all([
       db
         .select({
@@ -65,7 +72,13 @@ export async function GET() {
       }[],
     );
 
-    return NextResponse.json({ projects: enriched });
+    let payload = enriched;
+    if (forNewOrder) {
+      const blocked = await findProjectIdsBlockedForNewOrder();
+      payload = enriched.filter((p) => !blocked.has(p.id));
+    }
+
+    return NextResponse.json({ projects: payload });
   } catch (err) {
     return handleError(err);
   }

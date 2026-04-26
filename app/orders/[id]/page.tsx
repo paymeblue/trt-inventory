@@ -13,7 +13,6 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import useSWR from '@/lib/swr';
 import { useAuthedUser } from '@/components/session-context';
-import { Barcode } from '@/components/barcode';
 import { QrCode } from '@/components/qr-code';
 import { buildScanUrl } from '@/lib/scan-url';
 import { StatusPill } from '@/components/status-pill';
@@ -1084,14 +1083,9 @@ function ItemsGrid({
 }
 
 /**
- * Scan art block for a single order item.
- *
- * The phone QR is intentionally the visual hero — it encodes the full
- * `/s/<barcode>` deep-link, so any phone camera that locks onto it gets
- * a tappable URL that auto-runs the scan. The CODE128 strip is reserved
- * as a fallback for hardwired USB scanners (which type the bare barcode
- * into the manual input) and is sized small + clearly labelled so a phone
- * camera doesn't latch onto it first and just spit out the bare token.
+ * Scan art for a single order item: QR only. A linear barcode encoding the
+ * full URL was too wide for the card grid; the bare code is still shown in
+ * monospace under the card for typing / USB scanners.
  */
 function ItemScanArt({
   barcode,
@@ -1132,24 +1126,6 @@ function ItemScanArt({
               {host}/s/{barcode}
             </div>
           )}
-        </div>
-      </div>
-      <div className="mt-1 flex items-center gap-3 border-t border-dashed border-[color:var(--border)] pt-2">
-        <div className="flex flex-1 items-center justify-center">
-          <Barcode
-            value={url}
-            text={barcode}
-            height={42}
-            width={1.2}
-            displayValue
-          />
-        </div>
-        <div className="text-[9px] uppercase tracking-wide text-[color:var(--text-muted)]">
-          Linear
-          <br />
-          backup
-          <br />
-          (also URL)
         </div>
       </div>
     </div>

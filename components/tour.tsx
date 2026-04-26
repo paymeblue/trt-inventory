@@ -41,9 +41,22 @@ const TOOLTIP_W = 320;
 const TOOLTIP_MAX_H = 260;
 const GAP = 14;
 
+/** Floating tour launcher — draggable; position persisted in localStorage. */
+const TOUR_FAB_PX = 56;
+const TOUR_FAB_STORAGE = "trt-tour-fab-pos";
+
+function clampFab(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
+type FabPos = { left: number; top: number };
+
 function useIsMounted() {
   const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setMounted(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
   return mounted;
 }
 
@@ -70,8 +83,9 @@ function resolveBox(el: Element | null): AnchorBox | null {
  * to `/api/me/onboarded` and updates the session — so the tour never
  * appears again for that account on any device.
  *
- * The floating "? Guided tour" button remains so users can re-open it
- * manually on demand; only the automatic first-visit trigger is gated.
+ * A draggable floating “?” button (position remembered in localStorage)
+ * re-opens the tour on demand; only the automatic first-visit trigger is
+ * gated by `onboardedAt`.
  */
 export function Tour({ steps, autoStart = true }: TourProps) {
   const mounted = useIsMounted();
@@ -128,7 +142,8 @@ export function Tour({ steps, autoStart = true }: TourProps) {
 
   useLayoutEffect(() => {
     if (!open) return;
-    recompute();
+    const id = requestAnimationFrame(() => recompute());
+    return () => cancelAnimationFrame(id);
   }, [open, recompute, idx]);
 
   useEffect(() => {
@@ -176,6 +191,145 @@ export function Tour({ steps, autoStart = true }: TourProps) {
     setIdx(0);
     setOpen(true);
   }, []);
+
+  const [fabPos, setFabPos] = useState<FabPos | null>(null);
+  const fabPosRef = useRef<FabPos | null>(null);
+  const dragRef = useRef<{
+    ox: number;
+    oy: number;
+    ol: number;
+    ot: number;
+    moved: boolean;
+  } | null>(null);
+
+  useLayoutEffect(() => {
+    fabPosRef.current = fabPos;
+  }, [fabPos]);
+
+  useEffect(() => {
+    if (!mounted) return;
+    const tick = requestAnimationFrame(() => {
+      try {
+        const raw = localStorage.getItem(TOUR_FAB_STORAGE);
+        if (raw) {
+          const p = JSON.parse(raw) as FabPos;
+          if (typeof p.left === "number" && typeof p.top === "number") {
+            setFabPos({
+              left: clampFab(p.left, 8, window.innerWidth - TOUR_FAB_PX - 8),
+              top: clampFab(p.top, 8, window.innerHeight - TOUR_FAB_PX - 8),
+            });
+            return;
+          }
+        }
+      } catch {
+        /* ignore corrupt storage */
+      }
+      setFabPos({
+        left: window.innerWidth - TOUR_FAB_PX - 24,
+        top: window.innerHeight - TOUR_FAB_PX - 24,
+      });
+    });
+    return () => cancelAnimationFrame(tick);
+  }, [mounted]);
+
+  useEffect(() => {
+    if (!mounted || !fabPos) return;
+    const onResize = () => {
+      requestAnimationFrame(() => {
+        setFabPos((prev) =>
+          prev
+            ? {
+                left: clampFab(
+                  prev.left,
+                  8,
+                  window.innerWidth - TOUR_FAB_PX - 8,
+                ),
+                top: clampFab(
+                  prev.top,
+                  8,
+                  window.innerHeight - TOUR_FAB_PX - 8,
+                ),
+              }
+            : prev,
+        );
+      });
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [mounted, fabPos]);
+
+  const onFabPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLButtonElement>) => {
+      const p = fabPosRef.current;
+      if (!p) return;
+      e.currentTarget.setPointerCapture(e.pointerId);
+      dragRef.current = {
+        ox: e.clientX,
+        oy: e.clientY,
+        ol: p.left,
+        ot: p.top,
+        moved: false,
+      };
+    },
+    [],
+  );
+
+  const onFabPointerMove = useCallback(
+    (e: React.PointerEvent<HTMLButtonElement>) => {
+      const d = dragRef.current;
+      if (!d) return;
+      const dx = e.clientX - d.ox;
+      const dy = e.clientY - d.oy;
+      if (Math.hypot(dx, dy) > 4) d.moved = true;
+      setFabPos({
+        left: clampFab(
+          d.ol + dx,
+          8,
+          window.innerWidth - TOUR_FAB_PX - 8,
+        ),
+        top: clampFab(
+          d.ot + dy,
+          8,
+          window.innerHeight - TOUR_FAB_PX - 8,
+        ),
+      });
+    },
+    [],
+  );
+
+  const onFabPointerUp = useCallback(
+    (e: React.PointerEvent<HTMLButtonElement>) => {
+      const d = dragRef.current;
+      dragRef.current = null;
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        /* already released */
+      }
+      setFabPos((prev) => {
+        if (prev) {
+          try {
+            localStorage.setItem(TOUR_FAB_STORAGE, JSON.stringify(prev));
+          } catch {
+            /* private mode / quota */
+          }
+        }
+        return prev;
+      });
+      if (d && !d.moved) openTour();
+    },
+    [openTour],
+  );
+
+  const onFabKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLButtonElement>) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        openTour();
+      }
+    },
+    [openTour],
+  );
 
   const content = useMemo(() => {
     if (!open || !step) return null;
@@ -263,14 +417,30 @@ export function Tour({ steps, autoStart = true }: TourProps) {
 
   return (
     <>
-      <button
-        type="button"
-        onClick={openTour}
-        className="no-print btn btn-ghost fixed bottom-6 right-6 z-40 shadow-md"
-        aria-label="Show guided tour"
-      >
-        ? Guided tour
-      </button>
+      {mounted && fabPos !== null && steps.length > 0 ? (
+        <button
+          type="button"
+          className="no-print fixed z-40 flex cursor-grab select-none items-center justify-center rounded-full border border-[color:var(--border)] bg-[color:var(--primary)] text-[color:var(--primary-foreground)] shadow-lg active:cursor-grabbing"
+          style={{
+            left: fabPos.left,
+            top: fabPos.top,
+            width: TOUR_FAB_PX,
+            height: TOUR_FAB_PX,
+            touchAction: "none",
+          }}
+          aria-label="Guided tour: what to do next on this page"
+          title="Drag to move · Click for step-by-step help"
+          onPointerDown={onFabPointerDown}
+          onPointerMove={onFabPointerMove}
+          onPointerUp={onFabPointerUp}
+          onPointerCancel={onFabPointerUp}
+          onKeyDown={onFabKeyDown}
+        >
+          <span className="text-xl font-bold leading-none" aria-hidden>
+            ?
+          </span>
+        </button>
+      ) : null}
       {mounted && content ? createPortal(content, document.body) : null}
     </>
   );

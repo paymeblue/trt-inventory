@@ -6,6 +6,7 @@ import { orders, products, projects } from "@/db/schema";
 import { requireUser } from "@/lib/auth-guard";
 import { handleError, jsonError } from "@/lib/api";
 import { insertOrderItemLine } from "@/lib/order-item-line";
+import { isProjectEligibleForNewOrder } from "@/lib/project-new-order-eligibility";
 
 const createOrderSchema = z.object({
   projectId: z.string().uuid("projectId must be a UUID"),
@@ -65,6 +66,13 @@ export async function POST(req: NextRequest) {
       where: eq(projects.id, projectId),
     });
     if (!project) return jsonError(404, "Project not found");
+
+    if (!(await isProjectEligibleForNewOrder(projectId))) {
+      return jsonError(
+        400,
+        "This project already has a fulfilled order or verified items. Create a new project for another dispatch.",
+      );
+    }
 
     const row = await db.transaction(async (tx) => {
       const [orderRow] = await tx
