@@ -182,6 +182,20 @@ body {
 }
 .flash-error { animation: flashError 1.6s ease-out; }
 
+@keyframes confirmModalIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.confirm-modal-panel {
+  animation: confirmModalIn 0.22s ease-out;
+}
+
 .tour-spotlight {
   position: fixed;
   pointer-events: none;

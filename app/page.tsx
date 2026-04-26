@@ -4,6 +4,7 @@ import Link from "next/link";
 import useSWR from "@/lib/swr";
 import { StatusPill } from "@/components/status-pill";
 import { useAuthedUser } from "@/components/session-context";
+import { InstallerFlow } from "@/components/installer-flow";
 import type { OrderStatus } from "@/db/schema";
 
 interface StatsResponse {
@@ -64,6 +65,19 @@ export default function DashboardPage() {
         <div className="card border-[color:var(--danger)] p-4 text-sm text-[color:var(--danger)]">
           Failed to load stats.
         </div>
+      )}
+
+      {user.role === "installer" && (
+        <InstallerFlow
+          orders={(data?.recent ?? []).map((o) => ({
+            id: o.id,
+            projectName: o.projectName,
+            status: o.status,
+            total: o.total,
+            scanned: o.scanned,
+          }))}
+          loading={isLoading}
+        />
       )}
 
       <section className="grid grid-cols-2 gap-4 md:grid-cols-5">

@@ -45,9 +45,15 @@ describe("projectItemInputSchema", () => {
       {
         sku: "S1",
         name: "Widget",
-        stockQuantity: 0,
+        stockQuantity: 1,
       },
     );
+  });
+
+  it("rejects zero stock", () => {
+    expect(() =>
+      projectItemInputSchema.parse({ sku: "S", name: "N", stockQuantity: 0 }),
+    ).toThrow();
   });
 
   it("trims sku and name", () => {
@@ -166,7 +172,7 @@ describe("createProjectBodySchema", () => {
     expect(out.items).toHaveLength(200);
   });
 
-  it("parses nested items with default stock 0", () => {
+  it("parses nested items with explicit stock", () => {
     const out = createProjectBodySchema.parse({
       name: "With stock",
       items: [{ sku: "A", name: "One", stockQuantity: 42 }],

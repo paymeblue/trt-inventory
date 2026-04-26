@@ -19,6 +19,11 @@ if (password.length < 32) {
   );
 }
 
+/** Same secret used to sign short-lived browser handoff tokens. */
+export function getSessionSecret(): string {
+  return password;
+}
+
 export const sessionOptions: SessionOptions = {
   password,
   cookieName: "trt.session",

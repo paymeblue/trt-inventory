@@ -94,7 +94,14 @@ describe("decideAuthRouting — unauthenticated access", () => {
   });
 
   it("passes through public auth endpoints", () => {
-    for (const p of ["/api/auth/login", "/api/auth/logout", "/api/auth/me"]) {
+    for (const p of [
+      "/auth/handoff",
+      "/forgot-password",
+      "/api/auth/login",
+      "/api/auth/logout",
+      "/api/auth/me",
+      "/api/auth/forgot-password",
+    ]) {
       expect(
         decideAuthRouting({ ...base, pathname: p, hasSession: false }),
       ).toEqual({ kind: "next" });

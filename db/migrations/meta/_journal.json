@@ -29,6 +29,20 @@
       "when": 1776720000000,
       "tag": "0003_projects_and_items",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1777612800000,
+      "tag": "0004_password_reset_request",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1777612900000,
+      "tag": "0005_product_min_stock_one",
+      "breakpoints": true
     }
   ]
 }

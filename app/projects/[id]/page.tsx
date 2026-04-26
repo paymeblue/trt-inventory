@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import useSWR from "@/lib/swr";
+import { ConfirmModal } from "@/components/confirm-modal";
 import { StatusPill } from "@/components/status-pill";
 import { useAuthedUser } from "@/components/session-context";
 import type { OrderStatus } from "@/db/schema";
@@ -50,6 +51,15 @@ export default function ProjectDetailPage() {
   const { data, mutate, isLoading } = useSWR<ProjectDetailResponse>(
     params?.id ? `/api/projects/${params.id}` : null,
   );
+  const [deleteProjectOpen, setDeleteProjectOpen] = useState(false);
+  const [deleteProjectBusy, setDeleteProjectBusy] = useState(false);
+  const [deleteProjectError, setDeleteProjectError] = useState<string | null>(
+    null,
+  );
+
+  useEffect(() => {
+    if (deleteProjectOpen) setDeleteProjectError(null);
+  }, [deleteProjectOpen]);
 
   if (!user) return null;
   const isPm = user.role === "pm";
@@ -64,21 +74,26 @@ export default function ProjectDetailPage() {
 
   const { project, items, orders } = data;
 
-  async function onDeleteProject() {
-    if (!project) return;
-    if (
-      !confirm(
-        `Delete project "${project.name}"? This also deletes all its items. Orders under the project must be removed first.`,
-      )
-    ) {
-      return;
-    }
-    const res = await fetch(`/api/projects/${project.id}`, { method: "DELETE" });
-    if (res.ok) {
-      router.push("/projects");
-    } else {
-      const json = await res.json().catch(() => ({}));
-      alert(json.error ?? "Failed to delete project");
+  async function confirmDeleteProject() {
+    setDeleteProjectBusy(true);
+    setDeleteProjectError(null);
+    try {
+      const res = await fetch(`/api/projects/${project.id}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        setDeleteProjectOpen(false);
+        router.push("/projects");
+        return;
+      }
+      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      setDeleteProjectError(
+        typeof json.error === "string"
+          ? json.error
+          : "Failed to delete project",
+      );
+    } finally {
+      setDeleteProjectBusy(false);
     }
   }
 
@@ -109,7 +124,7 @@ export default function ProjectDetailPage() {
             </Link>
             <button
               type="button"
-              onClick={onDeleteProject}
+              onClick={() => setDeleteProjectOpen(true)}
               className="btn btn-danger"
             >
               Delete project
@@ -126,6 +141,31 @@ export default function ProjectDetailPage() {
       />
 
       <OrdersSection orders={orders} />
+
+      <ConfirmModal
+        open={deleteProjectOpen}
+        onOpenChange={(open) => {
+          setDeleteProjectOpen(open);
+          if (!open) setDeleteProjectError(null);
+        }}
+        title="Delete this project?"
+        description={
+          <>
+            <span className="font-medium text-[color:var(--text)]">
+              {project.name}
+            </span>{" "}
+            will be removed permanently. All items in this project are deleted
+            with it. If any orders still reference this project, delete or
+            reassign them first.
+          </>
+        }
+        confirmLabel="Delete project"
+        cancelLabel="Cancel"
+        variant="danger"
+        busy={deleteProjectBusy}
+        error={deleteProjectError}
+        onConfirm={confirmDeleteProject}
+      />
     </div>
   );
 }
@@ -147,7 +187,8 @@ function ItemsSection({
         <div>
           <h2 className="text-base font-semibold">Items</h2>
           <p className="text-xs text-[color:var(--text-muted)]">
-            Unique to this project. Scans on delivery decrement stock by 1.
+            Unique to this project. Starting stock is at least 1; PM adjustments
+            cannot go below 1 (delivery scans can still reduce on-hand stock).
           </p>
         </div>
       </header>
@@ -201,7 +242,7 @@ function AddItemForm({
 }) {
   const [sku, setSku] = useState("");
   const [name, setName] = useState("");
-  const [stock, setStock] = useState("0");
+  const [stock, setStock] = useState("1");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -216,14 +257,17 @@ function AddItemForm({
         body: JSON.stringify({
           sku: sku.trim(),
           name: name.trim(),
-          stockQuantity: Math.max(0, parseInt(stock || "0", 10) || 0),
+          stockQuantity: Math.max(
+            1,
+            Number.parseInt(stock || "1", 10) || 1,
+          ),
         }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Failed to add item");
       setSku("");
       setName("");
-      setStock("0");
+      setStock("1");
       await onCreated();
     } catch (err) {
       setError((err as Error).message);
@@ -253,7 +297,7 @@ function AddItemForm({
       />
       <input
         type="number"
-        min={0}
+        min={1}
         className="input text-right"
         placeholder="Stock"
         value={stock}
@@ -285,7 +329,7 @@ function ItemRow({
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(item.name);
   const [sku, setSku] = useState(item.sku);
-  const [delta, setDelta] = useState("0");
+  const [delta, setDelta] = useState("1");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -317,10 +361,10 @@ function ItemRow({
   }
 
   async function restock(sign: 1 | -1) {
-    const amt = Math.abs(parseInt(delta || "0", 10) || 0);
-    if (!amt) return;
+    const amt = Math.abs(Number.parseInt(delta || "1", 10) || 1);
+    if (amt < 1) return;
     await patch({ delta: sign * amt });
-    setDelta("0");
+    setDelta("1");
   }
 
   async function onDelete() {
@@ -409,10 +453,11 @@ function ItemRow({
               <div className="flex flex-wrap items-center justify-end gap-2">
                 <input
                   type="number"
-                  min={0}
+                  min={1}
                   value={delta}
                   onChange={(e) => setDelta(e.target.value)}
                   className="input w-20 text-right"
+                  title="Units to add or remove (minimum 1 per click)"
                 />
                 <button
                   onClick={() => restock(1)}
@@ -423,7 +468,12 @@ function ItemRow({
                 </button>
                 <button
                   onClick={() => restock(-1)}
-                  disabled={busy}
+                  disabled={busy || item.stockQuantity <= 1}
+                  title={
+                    item.stockQuantity <= 1
+                      ? "Stock cannot go below 1"
+                      : undefined
+                  }
                   className="btn btn-ghost text-xs"
                 >
                   − remove

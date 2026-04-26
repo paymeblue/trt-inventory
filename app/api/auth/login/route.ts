@@ -3,16 +3,17 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { users } from "@/db/schema";
+import { handleError, jsonError } from "@/lib/api";
+import { instrumentRouteHandler } from "@/lib/observability/instrument";
 import { verifyPassword } from "@/lib/password";
 import { getSession } from "@/lib/session";
-import { handleError, jsonError } from "@/lib/api";
 
 const loginSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
   password: z.string().min(1),
 });
 
-export async function POST(req: NextRequest) {
+async function handlePost(req: NextRequest) {
   try {
     const { email, password } = loginSchema.parse(await req.json());
     const user = await db.query.users.findFirst({
@@ -42,3 +43,5 @@ export async function POST(req: NextRequest) {
     return handleError(err);
   }
 }
+
+export const POST = instrumentRouteHandler("POST /api/auth/login", handlePost);

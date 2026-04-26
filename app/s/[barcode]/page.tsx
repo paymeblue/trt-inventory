@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth-guard";
+import { runPageWithObservability } from "@/lib/observability/instrument";
 import { executeScan, findOrderByBarcode } from "@/lib/scan-execute";
 import type { ScanOutcome } from "@/lib/scan";
 
@@ -25,6 +27,11 @@ export default async function ScanDeepLinkPage({
 }: {
   params: Promise<{ barcode: string }>;
 }) {
+  const h = await headers();
+  return runPageWithObservability(h, () => scanDeepLinkInner(params));
+}
+
+async function scanDeepLinkInner(params: Promise<{ barcode: string }>) {
   const { barcode: raw } = await params;
   const barcode = decodeURIComponent(raw).trim();
 

@@ -14,9 +14,12 @@
 
 const PUBLIC_PATHS = [
   "/login",
+  "/forgot-password",
+  "/auth/handoff",
   "/api/auth/login",
   "/api/auth/logout",
   "/api/auth/me",
+  "/api/auth/forgot-password",
 ];
 
 export type AuthRoutingInput = {
@@ -35,7 +38,7 @@ export function decideAuthRouting(input: AuthRoutingInput): AuthRoutingDecision 
   const { pathname, search, hasSession, redirectParam } = input;
 
   if (hasSession && pathname === "/login") {
-    const target = isSafeInternalPath(redirectParam) ? redirectParam : "/";
+    const target = isSafeInternalRedirectPath(redirectParam) ? redirectParam : "/";
     return { kind: "redirect", pathname: target, search: "" };
   }
 
@@ -67,8 +70,12 @@ function isPublicPath(pathname: string): boolean {
   );
 }
 
-function isSafeInternalPath(value: string | null): value is string {
-  // Guard against open-redirects: only accept same-origin absolute paths
-  // (must start with "/" and not with "//" which would be protocol-relative).
+/**
+ * Guard against open-redirects: only accept same-origin absolute paths
+ * (must start with "/" and not with "//" which would be protocol-relative).
+ */
+export function isSafeInternalRedirectPath(
+  value: string | null,
+): value is string {
   return !!value && value.startsWith("/") && !value.startsWith("//");
 }

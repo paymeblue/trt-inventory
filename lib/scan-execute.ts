@@ -8,6 +8,7 @@ import {
   stockMovements,
   type Order,
 } from "@/db/schema";
+import { logOrderCompleteEvent } from "@/lib/order-complete-event";
 import { computeProgress, resolveScan, type ScanOutcome } from "@/lib/scan";
 import type { AuthenticatedActor } from "@/lib/auth-guard";
 
@@ -50,7 +51,7 @@ export async function executeScan({
   barcode: string;
   actor: AuthenticatedActor;
 }): Promise<ScanExecuteResult> {
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx): Promise<ScanExecuteResult> => {
     const order = await tx.query.orders.findFirst({
       where: eq(orders.id, orderId),
     });
@@ -141,6 +142,21 @@ export async function executeScan({
           : undefined,
     };
   });
+
+  if (
+    result.kind === "ok" &&
+    result.outcome.result === "valid" &&
+    result.order.status === "fulfilled"
+  ) {
+    logOrderCompleteEvent({
+      orderId,
+      order: result.order,
+      actor,
+      progress: result.progress,
+    });
+  }
+
+  return result;
 }
 
 /**

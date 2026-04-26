@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
@@ -100,6 +101,15 @@ export default function LoginPage() {
           >
             {busy ? "Signing in…" : "Sign in"}
           </button>
+
+          <div className="text-center text-xs text-[color:var(--text-muted)]">
+            <Link
+              href="/forgot-password"
+              className="font-semibold text-[color:var(--primary)] hover:underline"
+            >
+              Forgot password?
+            </Link>
+          </div>
         </form>
       </div>
     </div>

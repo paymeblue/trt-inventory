@@ -4,7 +4,7 @@ import { z } from "zod";
 export const projectItemInputSchema = z.object({
   sku: z.string().trim().min(1).max(80),
   name: z.string().trim().min(1).max(160),
-  stockQuantity: z.number().int().min(0).default(0),
+  stockQuantity: z.number().int().min(1).default(1),
 });
 
 /** POST /api/projects body — parsed once here and in tests. */

@@ -1,11 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import type { IScannerControls } from "@zxing/browser";
 
-import { extractScanDeepLink } from "@/lib/scan-deep-link";
+import { extractBarcodeFromPayload } from "@/lib/scan-deep-link";
 
 interface ScanInputProps {
   onScan: (value: string) => void;
@@ -18,7 +17,6 @@ interface ScanInputProps {
  * enabled so the app is usable without camera permissions.
  */
 export function ScanInput({ onScan, disabled }: ScanInputProps) {
-  const router = useRouter();
   const [mode, setMode] = useState<"manual" | "camera">("manual");
   const [value, setValue] = useState("");
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -30,22 +28,24 @@ export function ScanInput({ onScan, disabled }: ScanInputProps) {
   const lastScanRef = useRef<{ value: string; at: number } | null>(null);
 
   /**
-   * Unifies what to do with a decoded payload (regardless of source):
-   *   - if it's a `/s/<barcode>` deep-link, navigate there so the auto-
-   *     complete flow kicks in;
-   *   - otherwise hand the raw barcode to the parent.
+   * Unifies what to do with a decoded payload regardless of source.
    *
-   * Held in a ref so the ZXing callback can always see the latest version
-   * without having to restart the camera stream on every render.
+   * Both the QR code and the CODE128 strip on each printed sticker
+   * encode the full `/s/<barcode>` deep-link URL (so 3rd-party phone
+   * scanner apps detect it as a URL and offer a tap-to-open action).
+   * That means a USB scanner reading the linear barcode on this page
+   * will type the URL into our input — we transparently unwrap it back
+   * to the bare barcode so the rapid-scan loop on the order page
+   * doesn't have to navigate away on every read.
+   *
+   * Held in a ref so the ZXing callback can always see the latest
+   * version without having to restart the camera stream on every render.
    */
   const payloadRef = useRef<(raw: string) => void>(() => undefined);
   payloadRef.current = (raw: string) => {
-    const deep = extractScanDeepLink(raw);
-    if (deep) {
-      router.push(deep);
-      return;
-    }
-    onScan(raw);
+    const barcode = extractBarcodeFromPayload(raw);
+    if (!barcode) return;
+    onScan(barcode);
   };
 
   useEffect(() => {
@@ -99,7 +99,7 @@ export function ScanInput({ onScan, disabled }: ScanInputProps) {
       controlsRef.current?.stop();
       controlsRef.current = null;
     };
-  }, [mode, deviceId, onScan]);
+  }, [mode, deviceId]);
 
   function submitManual(e: React.FormEvent) {
     e.preventDefault();

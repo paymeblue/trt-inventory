@@ -1,23 +1,36 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import useSWR from "@/lib/swr";
 import { useAuthedUser } from "@/components/session-context";
 import type { Role } from "@/db/schema";
 
+interface TeamMember {
+  id: string;
+  email: string;
+  name: string;
+  role: Role;
+  createdAt: string;
+  passwordResetRequestedAt: string | null;
+}
+
 interface TeamResponse {
-  users: {
-    id: string;
-    email: string;
-    name: string;
-    role: Role;
-    createdAt: string;
-  }[];
+  users: TeamMember[];
 }
 
 export default function TeamPage() {
   const me = useAuthedUser();
   const { data, mutate, isLoading } = useSWR<TeamResponse>("/api/users");
+  const [resetIssued, setResetIssued] = useState<{
+    name: string;
+    email: string;
+    password: string;
+  } | null>(null);
+
+  const pendingResets = useMemo(
+    () => (data?.users ?? []).filter((u) => u.passwordResetRequestedAt),
+    [data],
+  );
 
   if (!me) return null;
 
@@ -32,6 +45,33 @@ export default function TeamPage() {
     );
   }
 
+  async function resetPassword(u: TeamMember) {
+    if (
+      !confirm(
+        `Issue a brand-new temporary password for ${u.name}?\n\nTheir current password will stop working immediately.`,
+      )
+    ) {
+      return;
+    }
+    const res = await fetch(`/api/users/${u.id}/reset-password`, {
+      method: "POST",
+    });
+    const json = (await res.json().catch(() => ({}))) as {
+      tempPassword?: string;
+      error?: string;
+    };
+    if (!res.ok || !json.tempPassword) {
+      alert(json.error ?? "Failed to reset password");
+      return;
+    }
+    setResetIssued({
+      name: u.name,
+      email: u.email,
+      password: json.tempPassword,
+    });
+    await mutate();
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -42,6 +82,87 @@ export default function TeamPage() {
           are logged to their name.
         </p>
       </div>
+
+      {pendingResets.length > 0 && (
+        <section className="card border-[color:var(--warning)] bg-amber-50/60 p-5">
+          <div className="flex items-start gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[color:var(--warning)] text-base font-bold text-white">
+              !
+            </div>
+            <div className="flex-1">
+              <h2 className="text-base font-semibold text-[color:var(--warning)]">
+                {pendingResets.length} password reset request
+                {pendingResets.length === 1 ? "" : "s"}
+              </h2>
+              <p className="mt-1 text-xs text-[color:var(--text)]">
+                These teammates pinged the &quot;Forgot password&quot; flow.
+                Issue a fresh temporary password below — share it over a secure
+                channel and ask them to sign in.
+              </p>
+              <ul className="mt-3 space-y-2">
+                {pendingResets.map((u) => (
+                  <li
+                    key={u.id}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)] px-3 py-2"
+                  >
+                    <div className="text-sm">
+                      <span className="font-semibold">{u.name}</span>{" "}
+                      <span className="font-mono text-xs text-[color:var(--text-muted)]">
+                        {u.email}
+                      </span>
+                      <div className="text-[11px] text-[color:var(--text-muted)]">
+                        Requested{" "}
+                        {u.passwordResetRequestedAt
+                          ? new Date(
+                              u.passwordResetRequestedAt,
+                            ).toLocaleString()
+                          : "—"}
+                      </div>
+                    </div>
+                    <button
+                      className="btn btn-primary text-xs"
+                      onClick={() => resetPassword(u)}
+                    >
+                      Issue new password
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {resetIssued && (
+        <section className="card border-[color:var(--success)] bg-green-50 p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-[color:var(--success)]">
+                New password issued for {resetIssued.name}
+              </h2>
+              <p className="mt-1 text-xs text-[color:var(--text)]">
+                Share it once over a secure channel. We won&apos;t show this
+                value again — if it&apos;s lost, you&apos;ll need to issue
+                another reset.
+              </p>
+              <div className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-mono text-xs">
+                <span className="text-[color:var(--text-muted)]">Email:</span>
+                <span>{resetIssued.email}</span>
+                <span className="text-[color:var(--text-muted)]">
+                  Password:
+                </span>
+                <span className="font-bold">{resetIssued.password}</span>
+              </div>
+            </div>
+            <button
+              onClick={() => setResetIssued(null)}
+              className="text-xs text-[color:var(--text-muted)] hover:underline"
+            >
+              Dismiss
+            </button>
+          </div>
+        </section>
+      )}
 
       <InviteForm onCreated={mutate} />
 
@@ -56,13 +177,22 @@ export default function TeamPage() {
               <th className="px-6 py-3 text-left">Email</th>
               <th className="px-6 py-3 text-left">Role</th>
               <th className="px-6 py-3 text-left">Created</th>
-              <th className="px-6 py-3"></th>
+              <th className="px-6 py-3">
+                <span className="sr-only">Actions</span>
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[color:var(--border)]">
             {(data?.users ?? []).map((u) => (
               <tr key={u.id}>
-                <td className="px-6 py-3 font-medium">{u.name}</td>
+                <td className="px-6 py-3 font-medium">
+                  {u.name}
+                  {u.passwordResetRequestedAt && (
+                    <span className="ml-2 pill pill-anomaly">
+                      Reset requested
+                    </span>
+                  )}
+                </td>
                 <td className="px-6 py-3 font-mono text-xs">{u.email}</td>
                 <td className="px-6 py-3">
                   <span
@@ -78,18 +208,26 @@ export default function TeamPage() {
                 </td>
                 <td className="px-6 py-3 text-right">
                   {u.id !== me.id ? (
-                    <button
-                      onClick={async () => {
-                        if (!confirm(`Remove ${u.name}?`)) return;
-                        await fetch(`/api/users/${u.id}`, {
-                          method: "DELETE",
-                        });
-                        await mutate();
-                      }}
-                      className="text-xs font-semibold text-[color:var(--danger)] hover:underline"
-                    >
-                      Remove
-                    </button>
+                    <div className="flex justify-end gap-3">
+                      <button
+                        onClick={() => resetPassword(u)}
+                        className="text-xs font-semibold text-[color:var(--primary)] hover:underline"
+                      >
+                        Reset password
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (!confirm(`Remove ${u.name}?`)) return;
+                          await fetch(`/api/users/${u.id}`, {
+                            method: "DELETE",
+                          });
+                          await mutate();
+                        }}
+                        className="text-xs font-semibold text-[color:var(--danger)] hover:underline"
+                      >
+                        Remove
+                      </button>
+                    </div>
                   ) : (
                     <span className="text-xs text-[color:var(--text-muted)]">
                       (you)

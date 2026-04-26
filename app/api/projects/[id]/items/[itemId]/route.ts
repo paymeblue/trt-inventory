@@ -2,9 +2,30 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { and, eq, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { orderItems, products, stockMovements } from "@/db/schema";
+import { orderItems, orders, products, stockMovements } from "@/db/schema";
 import { requireUser } from "@/lib/auth-guard";
 import { handleError, jsonError } from "@/lib/api";
+
+/**
+ * Has the given SKU been referenced by any order *inside this project*?
+ *
+ * Critical that the search is scoped to the current project: SKUs are
+ * only unique per project, so a global lookup on `order_items.product_id`
+ * would falsely report usage when a sibling project happens to use the
+ * same SKU string. That would silently lock down rename/delete on items
+ * that, by domain rules, should be entirely independent.
+ */
+async function isSkuUsedInProject(projectId: string, sku: string) {
+  const [row] = await db
+    .select({ id: orderItems.id })
+    .from(orderItems)
+    .innerJoin(orders, eq(orders.id, orderItems.orderId))
+    .where(
+      and(eq(orders.projectId, projectId), eq(orderItems.productId, sku)),
+    )
+    .limit(1);
+  return !!row;
+}
 
 const patchSchema = z
   .object({
@@ -47,10 +68,7 @@ export async function PATCH(
     if (!item) return jsonError(404, "Item not found in this project");
 
     if (body.sku && body.sku !== item.sku) {
-      const used = await db.query.orderItems.findFirst({
-        where: eq(orderItems.productId, item.sku),
-      });
-      if (used) {
+      if (await isSkuUsedInProject(projectId, item.sku)) {
         return jsonError(
           409,
           "Cannot rename SKU after it has been used in an order. Create a new item instead.",
@@ -75,7 +93,14 @@ export async function PATCH(
     if (body.name) updates.name = body.name;
     if (body.sku) updates.sku = body.sku;
     if (body.delta !== undefined && body.delta !== 0) {
-      updates.stockQuantity = item.stockQuantity + body.delta;
+      const nextQty = item.stockQuantity + body.delta;
+      if (nextQty < 1) {
+        return jsonError(
+          400,
+          "Stock must stay at least 1. Reduce the amount or delete the item if it is obsolete.",
+        );
+      }
+      updates.stockQuantity = nextQty;
     }
 
     const [updated] = await db
@@ -121,10 +146,7 @@ export async function DELETE(
     });
     if (!item) return jsonError(404, "Item not found in this project");
 
-    const used = await db.query.orderItems.findFirst({
-      where: eq(orderItems.productId, item.sku),
-    });
-    if (used) {
+    if (await isSkuUsedInProject(projectId, item.sku)) {
       return jsonError(
         409,
         "Cannot delete an item that's referenced by an order. Remove those orders first.",

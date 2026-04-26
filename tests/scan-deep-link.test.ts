@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { extractScanDeepLink } from "@/lib/scan-deep-link";
+import {
+  extractBarcodeFromPayload,
+  extractScanDeepLink,
+} from "@/lib/scan-deep-link";
 
 /**
  * These tests cover the logic that decides whether a scanned payload is a
@@ -61,5 +64,60 @@ describe("extractScanDeepLink", () => {
     expect(
       extractScanDeepLink("https://app.example.com/x/s/TRT-ABC"),
     ).toBeNull();
+  });
+});
+
+/**
+ * `extractBarcodeFromPayload` is what the in-app `ScanInput` runs on every
+ * read so the rapid-scan loop on the order detail page works regardless of
+ * whether the operator's scanner read the QR (URL) or the CODE128 strip
+ * (which now also encodes the URL so 3rd-party phone scanners get a
+ * tappable link).
+ */
+describe("extractBarcodeFromPayload", () => {
+  it("unwraps an absolute https deep-link URL to the bare barcode", () => {
+    expect(
+      extractBarcodeFromPayload("https://app.example.com/s/TRT-ABC123DEF456"),
+    ).toBe("TRT-ABC123DEF456");
+  });
+
+  it("unwraps a relative /s/<barcode> path", () => {
+    expect(extractBarcodeFromPayload("/s/TRT-REL12345")).toBe("TRT-REL12345");
+  });
+
+  it("strips the query string when unwrapping", () => {
+    expect(
+      extractBarcodeFromPayload("https://x.test/s/TRT-Q?ref=sticker"),
+    ).toBe("TRT-Q");
+  });
+
+  it("decodes percent-encoded barcodes", () => {
+    // an installer's scanner could in theory emit the URL-encoded form
+    expect(extractBarcodeFromPayload("/s/TRT%2DABC")).toBe("TRT-ABC");
+  });
+
+  it("returns the bare barcode untouched (USB scanner / manual entry)", () => {
+    expect(extractBarcodeFromPayload("TRT-ABC123DEF456")).toBe(
+      "TRT-ABC123DEF456",
+    );
+  });
+
+  it("trims surrounding whitespace from any payload", () => {
+    expect(extractBarcodeFromPayload("  TRT-WHITE  ")).toBe("TRT-WHITE");
+    expect(
+      extractBarcodeFromPayload("  https://x.test/s/TRT-ABC  "),
+    ).toBe("TRT-ABC");
+  });
+
+  it("returns empty string for empty / whitespace input", () => {
+    expect(extractBarcodeFromPayload("")).toBe("");
+    expect(extractBarcodeFromPayload("   ")).toBe("");
+  });
+
+  it("passes through unrelated text unchanged so the API can reject it", () => {
+    expect(extractBarcodeFromPayload("https://evil.example.com/x")).toBe(
+      "https://evil.example.com/x",
+    );
+    expect(extractBarcodeFromPayload("not a barcode")).toBe("not a barcode");
   });
 });

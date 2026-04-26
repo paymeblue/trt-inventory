@@ -26,6 +26,7 @@ export async function GET() {
         role: users.role,
         createdById: users.createdById,
         createdAt: users.createdAt,
+        passwordResetRequestedAt: users.passwordResetRequestedAt,
       })
       .from(users)
       .orderBy(desc(users.createdAt));

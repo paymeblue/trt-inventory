@@ -90,19 +90,36 @@ export default function ProjectsPage() {
         />
       )}
 
-      {!isLoading && projects.length === 0 && (
+      {!isLoading && projects.length === 0 && !isPm && (
         <div className="card p-10 text-center text-sm text-[color:var(--text-muted)]">
-          {isPm
-            ? "No projects yet. Create one above to start adding items."
-            : "No projects have been shared with you yet. Ask your PM to set one up."}
+          No projects have been shared with you yet. Ask your PM to set one up.
         </div>
       )}
 
-      {filtered.length > 0 && (
-        <ul className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      {!isLoading && projects.length === 0 && isPm && (
+        <p className="text-sm text-[color:var(--text-muted)]">
+          No projects yet. Use the card below or &quot;+ New project&quot; above
+          to create one and add items.
+        </p>
+      )}
+
+      {projects.length > 0 && filtered.length === 0 && (
+        <p className="text-sm text-[color:var(--text-muted)]">
+          No projects match your search.
+        </p>
+      )}
+
+      {(filtered.length > 0 || (isPm && !isLoading && projects.length === 0)) && (
+        <ul className="grid grid-cols-1 gap-4 sm:grid-cols-12 sm:items-stretch">
           {filtered.map((p) => (
             <ProjectCard key={p.id} project={p} />
           ))}
+          {isPm && (
+            <NewProjectPlusTile
+              active={showForm}
+              onActivate={() => setShowForm(true)}
+            />
+          )}
         </ul>
       )}
     </div>
@@ -111,7 +128,7 @@ export default function ProjectsPage() {
 
 function ProjectCard({ project }: { project: ProjectRow }) {
   return (
-    <li className="card flex flex-col gap-3 p-5">
+    <li className="card flex h-full flex-col gap-3 p-5 sm:col-span-6 xl:col-span-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="truncate text-base font-semibold">{project.name}</h2>
@@ -139,6 +156,53 @@ function ProjectCard({ project }: { project: ProjectRow }) {
       <Link href={`/projects/${project.id}`} className="btn btn-ghost">
         Open project →
       </Link>
+    </li>
+  );
+}
+
+/** Half the width of a project card on sm+ (3/6 vs 6/12, 2/4 vs 4/12 on xl). */
+function NewProjectPlusTile({
+  onActivate,
+  active,
+}: {
+  onActivate: () => void;
+  active: boolean;
+}) {
+  return (
+    <li className="flex h-full sm:col-span-3 xl:col-span-2">
+      <button
+        type="button"
+        onClick={onActivate}
+        aria-pressed={active}
+        aria-label="Create new project"
+        className={`group relative flex h-full min-h-44 w-full flex-col items-center justify-center gap-3 overflow-hidden rounded-[14px] border-2 border-dashed border-[color:var(--border)] bg-[color:var(--surface)] px-4 py-8 text-center shadow-[var(--shadow-card)] transition-all duration-300 ease-out hover:-translate-y-1 hover:border-[color:var(--primary)] hover:shadow-[0_12px_40px_-12px_color-mix(in_oklab,var(--primary)_45%,transparent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--background)] active:translate-y-0 active:scale-[0.99] ${active ? "border-[color:var(--primary)] ring-2 ring-[color:var(--primary)]/30" : ""}`}
+      >
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100"
+          style={{
+            background:
+              "radial-gradient(ellipse 80% 60% at 50% 0%, color-mix(in oklab, var(--primary) 16%, transparent), transparent 55%), linear-gradient(135deg, color-mix(in oklab, var(--primary) 8%, transparent) 0%, transparent 45%)",
+          }}
+        />
+        <span className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-[color:var(--surface-muted)] text-[color:var(--text-muted)] shadow-inner transition-all duration-300 ease-out group-hover:scale-110 group-hover:bg-[color:var(--primary)] group-hover:text-[color:var(--primary-foreground)] group-hover:shadow-[0_0_24px_-4px_color-mix(in_oklab,var(--primary)_55%,transparent)]">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            className="h-9 w-9 transition-transform duration-300 ease-out group-hover:rotate-90"
+            aria-hidden
+          >
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+        </span>
+        <span className="relative text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)] transition-colors duration-300 group-hover:text-[color:var(--primary)]">
+          New project
+        </span>
+      </button>
     </li>
   );
 }
@@ -172,7 +236,7 @@ function NewProjectForm({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [items, setItems] = useState<DraftItem[]>([
-    { id: crypto.randomUUID(), sku: "", name: "", stockQuantity: "0" },
+    { id: crypto.randomUUID(), sku: "", name: "", stockQuantity: "1" },
   ]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -184,7 +248,7 @@ function NewProjectForm({
   function addItem() {
     setItems((prev) => [
       ...prev,
-      { id: crypto.randomUUID(), sku: "", name: "", stockQuantity: "0" },
+      { id: crypto.randomUUID(), sku: "", name: "", stockQuantity: "1" },
     ]);
   }
 
@@ -212,7 +276,10 @@ function NewProjectForm({
         .map((i) => ({
           sku: i.sku.trim(),
           name: i.name.trim(),
-          stockQuantity: Math.max(0, parseInt(i.stockQuantity || "0", 10) || 0),
+          stockQuantity: Math.max(
+            1,
+            Number.parseInt(i.stockQuantity || "1", 10) || 1,
+          ),
         }))
         .filter((i) => i.sku && i.name);
 
@@ -304,7 +371,7 @@ function NewProjectForm({
                 />
                 <input
                   type="number"
-                  min={0}
+                  min={1}
                   className="input text-right"
                   placeholder="Stock"
                   value={i.stockQuantity}

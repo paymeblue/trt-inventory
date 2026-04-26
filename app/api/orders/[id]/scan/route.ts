@@ -2,20 +2,22 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth-guard";
 import { handleError, jsonError } from "@/lib/api";
+import { instrumentRouteHandler } from "@/lib/observability/instrument";
 import { executeScan } from "@/lib/scan-execute";
 
 const scanSchema = z.object({
   barcode: z.string().trim().min(1),
 });
 
-export async function POST(
+async function handlePost(
   req: NextRequest,
-  { params }: { params: Promise<{ id: string }> },
+  ctx?: { params: Promise<{ id: string }> },
 ) {
+  if (!ctx) return jsonError(500, "Missing route context");
   const auth = await requireUser("installer");
   if ("error" in auth) return auth.error;
   try {
-    const { id } = await params;
+    const { id } = await ctx.params;
     const { barcode } = scanSchema.parse(await req.json());
 
     const result = await executeScan({
@@ -47,3 +49,8 @@ export async function POST(
     return handleError(err);
   }
 }
+
+export const POST = instrumentRouteHandler(
+  "POST /api/orders/[id]/scan",
+  handlePost,
+);

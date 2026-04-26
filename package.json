@@ -12,7 +12,8 @@
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "stress:scan": "tsx scripts/stress-scan-resolve.ts"
   },
   "dependencies": {
     "@zxing/browser": "^0.1.5",

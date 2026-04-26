@@ -998,6 +998,73 @@ function ItemsGrid({
   );
 }
 
+/**
+ * Scan art block for a single order item.
+ *
+ * The phone QR is intentionally the visual hero — it encodes the full
+ * `/s/<barcode>` deep-link, so any phone camera that locks onto it gets
+ * a tappable URL that auto-runs the scan. The CODE128 strip is reserved
+ * as a fallback for hardwired USB scanners (which type the bare barcode
+ * into the manual input) and is sized small + clearly labelled so a phone
+ * camera doesn't latch onto it first and just spit out the bare token.
+ */
+function ItemScanArt({ barcode }: { barcode: string }) {
+  const url = resolveScanUrl(barcode);
+  // Show the URL host as a small "tap-to-open" affordance so installers
+  // can sanity-check that the QR resolves to the right server.
+  let host = "";
+  try {
+    host = new URL(url).host;
+  } catch {
+    host = "";
+  }
+
+  return (
+    <div className="flex flex-col items-stretch gap-2 rounded-lg bg-white p-3">
+      <div className="flex flex-col items-center gap-1.5">
+        <a
+          href={url}
+          className="rounded-md ring-1 ring-[color:var(--border)] transition hover:ring-[color:var(--primary)]"
+          title="Tap on a phone to open the order. PMs: print this and stick it on the item."
+        >
+          <QrCode value={url} size={168} />
+        </a>
+        <div className="text-center">
+          <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[color:var(--primary)]">
+            Scan with phone camera
+          </div>
+          <div className="text-[10px] text-[color:var(--text-muted)]">
+            Opens automatically — no typing
+          </div>
+          {host && (
+            <div className="mt-0.5 break-all font-mono text-[9px] text-[color:var(--text-muted)]">
+              {host}/s/{barcode}
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="mt-1 flex items-center gap-3 border-t border-dashed border-[color:var(--border)] pt-2">
+        <div className="flex flex-1 items-center justify-center">
+          <Barcode
+            value={url}
+            text={barcode}
+            height={42}
+            width={1.2}
+            displayValue
+          />
+        </div>
+        <div className="text-[9px] uppercase tracking-wide text-[color:var(--text-muted)]">
+          Linear
+          <br />
+          backup
+          <br />
+          (also URL)
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ItemCard({
   item,
   product,
@@ -1061,17 +1128,7 @@ function ItemCard({
         </div>
       </div>
 
-      <div className="flex items-stretch gap-3 rounded-lg bg-white p-3">
-        <div className="flex flex-1 items-center justify-center">
-          <Barcode value={item.barcode} height={55} />
-        </div>
-        <div className="flex flex-col items-center justify-center border-l border-[color:var(--border)] pl-3">
-          <QrCode value={resolveScanUrl(item.barcode)} size={88} />
-          <div className="mt-1 text-[9px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
-            Scan with phone
-          </div>
-        </div>
-      </div>
+      <ItemScanArt barcode={item.barcode} />
 
       <div className="flex items-center justify-between text-[11px] text-[color:var(--text-muted)]">
         <span className="font-mono">{item.barcode}</span>

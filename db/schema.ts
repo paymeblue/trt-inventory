@@ -38,6 +38,15 @@ export const users = pgTable(
      * open on their first visit to a page that wires one up.
      */
     onboardedAt: timestamp("onboarded_at", { withTimezone: true }),
+    /**
+     * When the user submitted a "forgot password" request from the public
+     * sign-in screen. PMs see these as a queue on /team and reset the
+     * password on the user's behalf (no email infra required). Cleared
+     * the moment the new password is issued.
+     */
+    passwordResetRequestedAt: timestamp("password_reset_requested_at", {
+      withTimezone: true,
+    }),
   },
   (t) => [uniqueIndex("users_email_unique").on(t.email)],
 );
@@ -79,7 +88,7 @@ export const products = pgTable(
       .references(() => projects.id, { onDelete: "cascade" }),
     sku: text("sku").notNull(),
     name: text("name").notNull(),
-    stockQuantity: integer("stock_quantity").notNull().default(0),
+    stockQuantity: integer("stock_quantity").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
