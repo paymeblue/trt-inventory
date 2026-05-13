@@ -173,6 +173,29 @@ async function scanDeepLinkInner(
     );
   }
 
+  if (result.kind === 'installer_not_assigned') {
+    return (
+      <OutcomeShell
+        status="blocked"
+        title="Not the assigned installer"
+        body="This project is locked to a different installer for in-app scans. Use the printed QR on the box, or ask your PM to assign this route to you."
+        orderHref={orderHref}
+        hideNavigation={hideNavigation}
+      />
+    );
+  }
+
+  if (result.kind === 'logistics_not_verified') {
+    return (
+      <OutcomeShell
+        status="blocked"
+        title="Warehouse scan required first"
+        body={`Logistics must scan this SKU in the warehouse before on-site verification (SKU ${result.sku}). Ask logistics to finish the warehouse scan list for this project.`}
+        hideNavigation={hideNavigation}
+      />
+    );
+  }
+
   return (
     <OutcomeView
       outcome={result.outcome}

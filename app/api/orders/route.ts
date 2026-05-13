@@ -3,7 +3,7 @@ import { z } from "zod";
 import { asc, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { orders, products, projects } from "@/db/schema";
-import { requireUser } from "@/lib/auth-guard";
+import { requireUser, requireUserAny } from "@/lib/auth-guard";
 import { handleError, jsonError } from "@/lib/api";
 import { insertOrderItemLine } from "@/lib/order-item-line";
 import { isProjectEligibleForNewOrder } from "@/lib/project-new-order-eligibility";
@@ -27,7 +27,20 @@ export async function GET() {
       orderBy: [desc(orders.createdAt)],
     });
 
-    const payload = rows.map((o) => {
+    const payload = rows
+      .filter((o) => {
+        const pendingGate =
+          Boolean(o.isLogisticsGate) &&
+          o.project?.approvalStatus === "pending_logistics";
+        if (pendingGate && auth.actor.role !== "logistics") {
+          return false;
+        }
+        if (auth.actor.role === "installer") {
+          return o.project?.approvalStatus === "active";
+        }
+        return true;
+      })
+      .map((o) => {
       const total = o.items.length;
       const scanned = o.items.filter((i) => i.scannedAt !== null).length;
       return {
@@ -57,7 +70,7 @@ export async function GET() {
  * newly-created SKUs until the first scan (same rules as POST …/items).
  */
 export async function POST(req: NextRequest) {
-  const auth = await requireUser("pm");
+  const auth = await requireUserAny(["pm", "super_admin"]);
   if ("error" in auth) return auth.error;
   try {
     const { projectId } = createOrderSchema.parse(await req.json());
@@ -66,6 +79,12 @@ export async function POST(req: NextRequest) {
       where: eq(projects.id, projectId),
     });
     if (!project) return jsonError(404, "Project not found");
+    if (project.approvalStatus !== "active") {
+      return jsonError(
+        400,
+        "This project is not active yet. Wait for super-admin and logistics approval.",
+      );
+    }
 
     if (!(await isProjectEligibleForNewOrder(projectId))) {
       return jsonError(

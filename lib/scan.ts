@@ -11,6 +11,12 @@ export interface ScanComputationInput {
   orderStatus: OrderStatus;
 }
 
+export interface LogisticsScanComputationInput {
+  barcode: string;
+  items: Pick<OrderItem, "id" | "barcode" | "logisticsScannedAt">[];
+  orderStatus: OrderStatus;
+}
+
 export interface ScanComputationResult {
   outcome: ScanOutcome;
   /** new order status to persist; undefined means do not change */
@@ -69,6 +75,47 @@ export function computeProgress(
 ): ProgressSummary {
   const total = items.length;
   const scanned = items.filter((i) => i.scannedAt !== null && i.scannedAt !== undefined).length;
+  const remaining = total - scanned;
+  const percent = total === 0 ? 0 : Math.round((scanned / total) * 100);
+  return { total, scanned, remaining, percent };
+}
+
+/**
+ * Same semantics as installer `resolveScan`, but uses logistics warehouse fields
+ * and never advances the order to fulfilled (that happens after site scans).
+ */
+export function resolveLogisticsScan(
+  input: LogisticsScanComputationInput,
+): ScanComputationResult {
+  const { barcode, items, orderStatus } = input;
+  const match = items.find((i) => i.barcode === barcode);
+
+  if (!match) {
+    return {
+      outcome: { result: "invalid", barcode },
+      nextStatus: orderStatus === "fulfilled" ? orderStatus : "anomaly",
+    };
+  }
+
+  if (
+    match.logisticsScannedAt !== null &&
+    match.logisticsScannedAt !== undefined
+  ) {
+    return { outcome: { result: "duplicate", itemId: match.id } };
+  }
+
+  return {
+    outcome: { result: "valid", itemId: match.id },
+  };
+}
+
+export function computeLogisticsProgress(
+  items: Pick<OrderItem, "logisticsScannedAt">[],
+): ProgressSummary {
+  const total = items.length;
+  const scanned = items.filter(
+    (i) => i.logisticsScannedAt !== null && i.logisticsScannedAt !== undefined,
+  ).length;
   const remaining = total - scanned;
   const percent = total === 0 ? 0 : Math.round((scanned / total) * 100);
   return { total, scanned, remaining, percent };

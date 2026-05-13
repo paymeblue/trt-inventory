@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { computeProgress, resolveScan } from "@/lib/scan";
+import {
+  computeLogisticsProgress,
+  computeProgress,
+  resolveLogisticsScan,
+  resolveScan,
+} from "@/lib/scan";
 import type { OrderStatus } from "@/db/schema";
 
 type Item = {
@@ -323,6 +328,59 @@ describe("computeProgress", () => {
       computeProgress([
         { scannedAt: undefined as unknown as null },
         { scannedAt: new Date() },
+      ]),
+    ).toEqual({ total: 2, scanned: 1, remaining: 1, percent: 50 });
+  });
+});
+
+describe("resolveLogisticsScan", () => {
+  function lItem(
+    id: string,
+    barcode: string,
+    logisticsScannedAt: Date | null = null,
+  ) {
+    return { id, barcode, logisticsScannedAt };
+  }
+
+  it("marks valid for first warehouse scan", () => {
+    const items = [lItem("1", "TRT-A"), lItem("2", "TRT-B")];
+    const res = resolveLogisticsScan({
+      barcode: "TRT-A",
+      items,
+      orderStatus: "active",
+    });
+    expect(res.outcome).toEqual({ result: "valid", itemId: "1" });
+    expect(res.nextStatus).toBeUndefined();
+  });
+
+  it("never auto-fulfills installer order from logistics scans", () => {
+    const items = [lItem("1", "TRT-A", new Date()), lItem("2", "TRT-B")];
+    const res = resolveLogisticsScan({
+      barcode: "TRT-B",
+      items,
+      orderStatus: "active",
+    });
+    expect(res.outcome.result).toBe("valid");
+    expect(res.nextStatus).toBeUndefined();
+  });
+
+  it("duplicate when logistics line already scanned", () => {
+    const items = [lItem("1", "TRT-A", new Date()), lItem("2", "TRT-B")];
+    const res = resolveLogisticsScan({
+      barcode: "TRT-A",
+      items,
+      orderStatus: "active",
+    });
+    expect(res.outcome).toEqual({ result: "duplicate", itemId: "1" });
+  });
+});
+
+describe("computeLogisticsProgress", () => {
+  it("counts logistics scans only", () => {
+    expect(
+      computeLogisticsProgress([
+        { logisticsScannedAt: new Date() },
+        { logisticsScannedAt: null },
       ]),
     ).toEqual({ total: 2, scanned: 1, remaining: 1, percent: 50 });
   });

@@ -3,6 +3,7 @@
 import clsx from "clsx";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { playThemeToggleSound } from "@/lib/theme-toggle-sound";
+import { rolePillModifier, roleShortLabel } from "@/lib/role-label";
 import { useTheme } from "./theme-context";
 import type { SessionUser } from "./session-context";
 
@@ -88,9 +89,12 @@ export function UserMenu({
           </span>
         </span>
         <span
-          className={`pill hidden shrink-0 sm:inline-flex ${user.role === "pm" ? "pill-active" : "pill-fulfilled"}`}
+          className={clsx(
+            "pill hidden shrink-0 sm:inline-flex",
+            rolePillModifier(user.role),
+          )}
         >
-          {user.role === "pm" ? "PM" : "Installer"}
+          {roleShortLabel(user.role)}
         </span>
         <span
           className="shrink-0 text-[color:var(--text-muted)] transition-transform"
@@ -115,9 +119,9 @@ export function UserMenu({
             </p>
             <p className="mt-2">
               <span
-                className={`pill ${user.role === "pm" ? "pill-active" : "pill-fulfilled"}`}
+                className={clsx("pill", rolePillModifier(user.role))}
               >
-                {user.role === "pm" ? "PM" : "Installer"}
+                {roleShortLabel(user.role)}
               </span>
             </p>
           </div>

@@ -11,6 +11,7 @@ describe("enrichProjectsWithRollups", () => {
     description: null,
     archivedAt: null,
     createdAt: "2026-01-01",
+    approvalStatus: "active" as const,
   };
   const p2 = {
     id: "p2",
@@ -18,6 +19,7 @@ describe("enrichProjectsWithRollups", () => {
     description: "x",
     archivedAt: null,
     createdAt: "2026-01-02",
+    approvalStatus: "active" as const,
   };
 
   it("zeros rollups when there are no items or orders", () => {

@@ -1,3 +1,5 @@
+import type { ProjectApprovalStatus } from "@/db/schema";
+
 /**
  * Pure merge logic for GET /api/projects rollups. Extracted so regressions
  * in count/stock/order aggregation are caught by unit tests without DB.
@@ -9,6 +11,7 @@ export type ProjectListRow = {
   description: string | null;
   archivedAt: Date | string | null;
   createdAt: Date | string;
+  approvalStatus: ProjectApprovalStatus;
 };
 
 export type ItemRollup = {

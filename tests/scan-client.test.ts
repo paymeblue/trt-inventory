@@ -27,9 +27,13 @@ describe("classifyScanResponse", () => {
     if (r.kind === "auth") expect(r.message).toBe("Not signed in");
   });
 
-  it("maps 403 to auth as well", () => {
-    const r = classifyScanResponse({ ok: false, status: 403 }, { error: "forbidden" });
-    expect(r.kind).toBe("auth");
+  it("maps 403 to forbidden", () => {
+    const r = classifyScanResponse(
+      { ok: false, status: 403 },
+      { error: "Not allowed" },
+    );
+    expect(r.kind).toBe("forbidden");
+    if (r.kind === "forbidden") expect(r.message).toBe("Not allowed");
   });
 
   it("maps 404 to conflict (order gone)", () => {

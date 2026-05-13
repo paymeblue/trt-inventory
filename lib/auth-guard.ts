@@ -72,6 +72,28 @@ export async function requireUser(
 }
 
 /**
+ * Any one of the listed roles is sufficient (403 if authenticated but wrong role set).
+ */
+export async function requireUserAny(
+  allowed: readonly Role[],
+): Promise<{ actor: AuthenticatedActor } | { error: Response }> {
+  const session = await getSession();
+  const actor = toActor(session);
+  if (!actor) {
+    return { error: jsonError(401, "Not authenticated") };
+  }
+  if (!allowed.includes(actor.role)) {
+    return {
+      error: jsonError(
+        403,
+        `This action requires one of: ${allowed.join(", ")}`,
+      ),
+    };
+  }
+  return { actor };
+}
+
+/**
  * For server components. Returns the current user or null. Pages typically
  * call this and redirect to `/login` when null.
  */

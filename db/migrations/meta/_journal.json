@@ -50,6 +50,27 @@
       "when": 1777613000000,
       "tag": "0006_clamp_negative_product_stock",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1778208000000,
+      "tag": "0007_project_installer_and_multi_order_lines",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1778294400000,
+      "tag": "0008_approval_roles_and_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1778380800000,
+      "tag": "0009_logistics_gate_order",
+      "breakpoints": true
     }
   ]
 }

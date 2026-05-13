@@ -23,8 +23,11 @@ Next.js (App Router), TypeScript, Tailwind v4, Postgres, and Drizzle ORM.
   order on-site, and scans each barcode one at a time.
 
 A **seed PM** is created on the first migration (from `SEED_PM_EMAIL` /
-`SEED_PM_PASSWORD` in `.env.local`). The PM then creates all other users from
-the **Team** page.
+`SEED_PM_PASSWORD` in `.env.local`). Optional env `BOOTSTRAP_SUPER_ADMIN_EMAIL`
+(+ `BOOTSTRAP_SUPER_ADMIN_PASSWORD`) promotes an existing user to **super
+admin** or creates one, so you can use **Team** to invite **logistics** users.
+Leave those vars unset in production unless you intend to run a one-time
+bootstrap.
 
 ## Data model
 
@@ -87,6 +90,11 @@ SESSION_SECRET=replace_with_a_long_random_string_at_least_32_chars
 SEED_PM_EMAIL=pm@trt.local
 SEED_PM_PASSWORD=changeme123
 SEED_PM_NAME=Project Manager
+
+# One-time super_admin (promote existing email, or create user if email + password set)
+# BOOTSTRAP_SUPER_ADMIN_EMAIL=admin@trt.local
+# BOOTSTRAP_SUPER_ADMIN_PASSWORD=your-secure-password
+# BOOTSTRAP_SUPER_ADMIN_NAME=Super Admin
 ```
 
 Then:

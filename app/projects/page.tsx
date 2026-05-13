@@ -2,8 +2,12 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import useSWR from "@/lib/swr";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { fetchJson } from "@/lib/fetch-json";
+import { queryKeys } from "@/lib/query-keys";
+import { reassignAutoSkus } from "@/lib/sku-from-label";
 import { useAuthedUser } from "@/components/session-context";
+import type { ProjectApprovalStatus } from "@/db/schema";
 
 interface ProjectRow {
   id: string;
@@ -15,6 +19,7 @@ interface ProjectRow {
   totalStock: number;
   activeOrderCount: number;
   fulfilledOrderCount: number;
+  approvalStatus: ProjectApprovalStatus;
 }
 
 interface ProjectsResponse {
@@ -26,6 +31,8 @@ interface DraftItem {
   sku: string;
   name: string;
   stockQuantity: string;
+  /** When true, SKU was edited manually and won't be overwritten by auto-label. */
+  skuDirty?: boolean;
 }
 
 /**
@@ -35,13 +42,17 @@ interface DraftItem {
  */
 export default function ProjectsPage() {
   const user = useAuthedUser();
-  const { data, mutate, isLoading } =
-    useSWR<ProjectsResponse>("/api/projects");
+  const qc = useQueryClient();
+  const { data, isPending } = useQuery({
+    queryKey: queryKeys.projects,
+    queryFn: () => fetchJson<ProjectsResponse>("/api/projects"),
+  });
   const [showForm, setShowForm] = useState(false);
   const [query, setQuery] = useState("");
 
   if (!user) return null;
-  const isPm = user.role === "pm";
+  const canCreateProject =
+    user.role === "pm" || user.role === "super_admin";
 
   const projects = data?.projects ?? [];
   const filtered = query.trim()
@@ -60,7 +71,7 @@ export default function ProjectsPage() {
             they belong to and can never be reused elsewhere.
           </p>
         </div>
-        {isPm && (
+        {canCreateProject && (
           <button
             type="button"
             onClick={() => setShowForm((s) => !s)}
@@ -71,10 +82,10 @@ export default function ProjectsPage() {
         )}
       </div>
 
-      {showForm && isPm && (
+      {showForm && canCreateProject && (
         <NewProjectForm
           onDone={async () => {
-            await mutate();
+            await qc.invalidateQueries({ queryKey: queryKeys.projects });
             setShowForm(false);
           }}
           onCancel={() => setShowForm(false)}
@@ -90,31 +101,31 @@ export default function ProjectsPage() {
         />
       )}
 
-      {!isLoading && projects.length === 0 && !isPm && (
+      {!isPending && projects.length === 0 && !canCreateProject && (
         <div className="card p-10 text-center text-sm text-[color:var(--text-muted)]">
           No projects have been shared with you yet. Ask your PM to set one up.
         </div>
       )}
 
-      {!isLoading && projects.length === 0 && isPm && (
+      {!isPending && projects.length === 0 && canCreateProject && (
         <p className="text-sm text-[color:var(--text-muted)]">
           No projects yet. Use the card below or &quot;+ New project&quot; above
           to create one and add items.
         </p>
       )}
 
-      {projects.length > 0 && filtered.length === 0 && (
+      {!isPending && projects.length > 0 && filtered.length === 0 && (
         <p className="text-sm text-[color:var(--text-muted)]">
           No projects match your search.
         </p>
       )}
 
-      {(filtered.length > 0 || (isPm && !isLoading && projects.length === 0)) && (
+      {(filtered.length > 0 || (canCreateProject && !isPending && projects.length === 0)) && (
         <ul className="grid grid-cols-1 gap-4 sm:grid-cols-12 sm:items-stretch">
           {filtered.map((p) => (
             <ProjectCard key={p.id} project={p} />
           ))}
-          {isPm && (
+          {canCreateProject && (
             <NewProjectPlusTile
               active={showForm}
               onActivate={() => setShowForm(true)}
@@ -126,12 +137,38 @@ export default function ProjectsPage() {
   );
 }
 
+function approvalListLabel(status: ProjectApprovalStatus): string {
+  switch (status) {
+    case "pending_super_admin":
+      return "Pending super-admin";
+    case "pending_logistics":
+      return "Awaiting logistics";
+    case "rejected_super_admin":
+      return "Rejected (super-admin)";
+    case "rejected_logistics":
+      return "Rejected (logistics)";
+    default:
+      return "";
+  }
+}
+
 function ProjectCard({ project }: { project: ProjectRow }) {
+  const user = useAuthedUser();
+  const showApproval =
+    user &&
+    user.role !== "installer" &&
+    project.approvalStatus !== "active";
+
   return (
     <li className="card flex h-full flex-col gap-3 p-5 sm:col-span-6 xl:col-span-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="truncate text-base font-semibold">{project.name}</h2>
+          {showApproval && (
+            <span className="mt-1 inline-block rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-900 dark:bg-amber-950/80 dark:text-amber-100">
+              {approvalListLabel(project.approvalStatus)}
+            </span>
+          )}
           {project.description && (
             <p className="mt-1 line-clamp-2 text-xs text-[color:var(--text-muted)]">
               {project.description}
@@ -242,18 +279,37 @@ function NewProjectForm({
   const [error, setError] = useState<string | null>(null);
 
   function updateItem(id: string, patch: Partial<DraftItem>) {
-    setItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)));
+    setItems((prev) => {
+      const next = prev.map((i) => {
+        if (i.id !== id) return i;
+        const merged: DraftItem = { ...i, ...patch };
+        if (patch.sku !== undefined && patch.name === undefined) {
+          merged.skuDirty = true;
+        }
+        if (patch.name !== undefined) {
+          merged.skuDirty = false;
+        }
+        return merged;
+      });
+      return reassignAutoSkus(next);
+    });
   }
 
   function addItem() {
-    setItems((prev) => [
-      ...prev,
-      { id: crypto.randomUUID(), sku: "", name: "", stockQuantity: "1" },
-    ]);
+    setItems((prev) =>
+      reassignAutoSkus([
+        ...prev,
+        { id: crypto.randomUUID(), sku: "", name: "", stockQuantity: "1" },
+      ]),
+    );
   }
 
   function removeItem(id: string) {
-    setItems((prev) => (prev.length > 1 ? prev.filter((i) => i.id !== id) : prev));
+    setItems((prev) =>
+      prev.length > 1
+        ? reassignAutoSkus(prev.filter((i) => i.id !== id))
+        : prev,
+    );
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -272,7 +328,8 @@ function NewProjectForm({
         return;
       }
 
-      const cleanItems = items
+      const normalized = reassignAutoSkus(items);
+      const cleanItems = normalized
         .map((i) => ({
           sku: i.sku.trim(),
           name: i.name.trim(),
@@ -365,7 +422,7 @@ function NewProjectForm({
                 />
                 <input
                   className="input"
-                  placeholder="Name (e.g. 2kW Inverter)"
+                  placeholder="Name (e.g. Top Upper Unit) — SKU suggests automatically"
                   value={i.name}
                   onChange={(e) => updateItem(i.id, { name: e.target.value })}
                 />

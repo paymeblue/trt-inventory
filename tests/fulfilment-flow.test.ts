@@ -248,7 +248,7 @@ describe("fulfilment flow — auth gating", () => {
     expect(step.nextWarehouse.get("SKU-A")!.stockQuantity).toBe(5);
 
     const classified = clientHandle(step.response);
-    expect(classified.kind).toBe("auth");
+    expect(classified.kind).toBe("forbidden");
   });
 });
 

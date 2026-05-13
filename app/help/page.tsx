@@ -8,7 +8,9 @@ type RoleTab = "pm" | "installer";
 
 export default function HelpPage() {
   const user = useAuthedUser();
-  const [tab, setTab] = useState<RoleTab>(user?.role ?? "pm");
+  const [tab, setTab] = useState<RoleTab>(
+    user?.role === "installer" ? "installer" : "pm",
+  );
 
   if (!user) return null;
 

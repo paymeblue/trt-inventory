@@ -2,13 +2,14 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { orderItems, orders, products } from "@/db/schema";
-import { requireUser } from "@/lib/auth-guard";
+import { type OrderItem, orderItems, orders, products } from "@/db/schema";
+import { requireUserAny } from "@/lib/auth-guard";
 import { insertOrderItemLine } from "@/lib/order-item-line";
 import { handleError, jsonError } from "@/lib/api";
 
 const addItemSchema = z.object({
   productId: z.string().trim().min(1, "productId required").max(80),
+  quantity: z.coerce.number().int().min(1).max(99).optional().default(1),
 });
 
 /**
@@ -22,11 +23,11 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireUser("pm");
+  const auth = await requireUserAny(["pm", "super_admin"]);
   if ("error" in auth) return auth.error;
   try {
     const { id } = await params;
-    const { productId } = addItemSchema.parse(await req.json());
+    const { productId, quantity } = addItemSchema.parse(await req.json());
 
     const order = await db.query.orders.findFirst({ where: eq(orders.id, id) });
     if (!order) return jsonError(404, "Order not found");
@@ -57,17 +58,16 @@ export async function POST(
       );
     }
 
-    const existing = await db.query.orderItems.findFirst({
-      where: and(eq(orderItems.orderId, id), eq(orderItems.productId, productId)),
-    });
-    if (existing) {
-      return jsonError(409, `SKU "${productId}" is already in this order`);
+    const rows: OrderItem[] = [];
+    for (let q = 0; q < quantity; q++) {
+      const inserted = await insertOrderItemLine(db, id, productId);
+      rows.push(inserted[0]!);
     }
 
-    const [row] = await insertOrderItemLine(db, id, productId);
     return NextResponse.json(
       {
-        item: row,
+        items: rows,
+        count: rows.length,
         product: {
           sku: product.sku,
           name: product.name,
@@ -85,7 +85,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireUser("pm");
+  const auth = await requireUserAny(["pm", "super_admin"]);
   if ("error" in auth) return auth.error;
   try {
     const { id } = await params;

@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { products, projects, stockMovements } from "@/db/schema";
-import { requireUser } from "@/lib/auth-guard";
+import { requireUserAny } from "@/lib/auth-guard";
 import { handleError, jsonError } from "@/lib/api";
 import { projectItemInputSchema } from "@/lib/project-validation";
 
@@ -14,7 +14,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireUser("pm");
+  const auth = await requireUserAny(["pm", "super_admin"]);
   if ("error" in auth) return auth.error;
   try {
     const { id: projectId } = await params;

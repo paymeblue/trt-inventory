@@ -2,12 +2,17 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import useSWR from "@/lib/swr";
+import {
+  formatSkuSequence,
+  nextSkuIndexForBase,
+  skuBaseFromLabel,
+} from "@/lib/sku-from-label";
 import { ConfirmModal } from "@/components/confirm-modal";
 import { StatusPill } from "@/components/status-pill";
 import { useAuthedUser } from "@/components/session-context";
-import type { OrderStatus } from "@/db/schema";
+import type { OrderStatus, ProjectApprovalStatus, Role } from "@/db/schema";
 
 interface Item {
   id: string;
@@ -31,6 +36,10 @@ interface Project {
   description: string | null;
   createdAt: string;
   archivedAt: string | null;
+  installerUserId: string | null;
+  approvalStatus: ProjectApprovalStatus;
+  pendingPatch: unknown;
+  projectBarcode: string | null;
 }
 
 interface ProjectDetailResponse {
@@ -46,6 +55,98 @@ interface ProjectDetailResponse {
  * see the orders scoped to it. PMs get the full surface; installers
  * see a read-only summary.
  */
+function ProjectApprovalBanners({
+  project,
+  viewerRole,
+}: {
+  project: Project;
+  viewerRole: Role;
+}) {
+  const patch =
+    project.pendingPatch && typeof project.pendingPatch === "object"
+      ? (project.pendingPatch as Record<string, unknown>)
+      : null;
+  const patchKeys = patch ? Object.keys(patch) : [];
+  const hasQueuedPatch = patchKeys.length > 0;
+
+  const statusCopy: Partial<
+    Record<ProjectApprovalStatus, { title: string; body: string }>
+  > = {
+    pending_super_admin: {
+      title: "Waiting for super-admin approval",
+      body: "Installers cannot see this project until a super-admin approves it and logistics activates it.",
+    },
+    pending_logistics: {
+      title: "Waiting for logistics",
+      body: "Super-admin approved this project. Logistics must confirm stock and activate it before installers can use it.",
+    },
+    rejected_super_admin: {
+      title: "Rejected by super-admin",
+      body: "This project was not approved. Contact your supervisor if this is unexpected.",
+    },
+    rejected_logistics: {
+      title: "Rejected by logistics",
+      body: "Logistics could not fulfill this project as requested.",
+    },
+  };
+
+  const blocks: ReactNode[] = [];
+
+  if (
+    project.approvalStatus !== "active" &&
+    statusCopy[project.approvalStatus]
+  ) {
+    const m = statusCopy[project.approvalStatus]!;
+    blocks.push(
+      <div
+        key="status"
+        className="card border-amber-200 bg-amber-50/90 p-4 dark:border-amber-900/60 dark:bg-amber-950/40"
+      >
+        <div className="text-sm font-semibold text-amber-950 dark:text-amber-100">
+          {m.title}
+        </div>
+        <p className="mt-1 text-xs text-[color:var(--text)]">{m.body}</p>
+        {viewerRole === "logistics" &&
+          project.approvalStatus === "pending_logistics" &&
+          project.projectBarcode && (
+            <p className="mt-2 font-mono text-sm text-[color:var(--text)]">
+              <span className="font-sans text-xs font-semibold text-[color:var(--text-muted)]">
+                Project barcode:{" "}
+              </span>
+              {project.projectBarcode}
+            </p>
+          )}
+      </div>,
+    );
+  }
+
+  if (
+    hasQueuedPatch &&
+    (viewerRole === "pm" ||
+      viewerRole === "super_admin" ||
+      viewerRole === "logistics")
+  ) {
+    blocks.push(
+      <div
+        key="patch"
+        className="card border-[color:var(--border)] bg-[color:var(--surface-muted)]/80 p-4"
+      >
+        <div className="text-sm font-semibold">Updates queued</div>
+        <p className="mt-1 text-xs text-[color:var(--text-muted)]">
+          Edits to name, description, or installer assignment are held until
+          logistics applies them:{" "}
+          <span className="font-medium text-[color:var(--text)]">
+            {patchKeys.join(", ")}
+          </span>
+        </p>
+      </div>,
+    );
+  }
+
+  if (blocks.length === 0) return null;
+  return <div className="space-y-3">{blocks}</div>;
+}
+
 export default function ProjectDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -64,7 +165,7 @@ export default function ProjectDetailPage() {
   }, [deleteProjectOpen]);
 
   if (!user) return null;
-  const isPm = user.role === "pm";
+  const canManage = user.role === "pm" || user.role === "super_admin";
 
   if (isLoading || !data) {
     return (
@@ -117,7 +218,7 @@ export default function ProjectDetailPage() {
             </p>
           )}
         </div>
-        {isPm && (
+        {canManage && (
           <div className="flex flex-wrap gap-2 self-start">
             {eligibleForNewOrder ? (
               <Link
@@ -146,10 +247,20 @@ export default function ProjectDetailPage() {
         )}
       </div>
 
+      <ProjectApprovalBanners project={project} viewerRole={user.role} />
+
+      {canManage && (
+        <InstallerAssignmentPanel
+          projectId={project.id}
+          installerUserId={project.installerUserId}
+          onChanged={mutate}
+        />
+      )}
+
       <ItemsSection
         projectId={project.id}
         items={items}
-        canEdit={isPm}
+        canEdit={canManage}
         onChanged={mutate}
       />
 
@@ -183,6 +294,92 @@ export default function ProjectDetailPage() {
   );
 }
 
+function InstallerAssignmentPanel({
+  projectId,
+  installerUserId,
+  onChanged,
+}: {
+  projectId: string;
+  installerUserId: string | null;
+  onChanged: () => Promise<unknown>;
+}) {
+  const { data } = useSWR<{ users: { id: string; name: string; email: string; role: string }[] }>(
+    "/api/users",
+  );
+  const [value, setValue] = useState(installerUserId ?? "");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    setValue(installerUserId ?? "");
+  }, [installerUserId]);
+
+  const installers =
+    data?.users.filter((u) => u.role === "installer") ?? [];
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          installerUserId: value === "" ? null : value,
+        }),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        error?: string;
+      };
+      if (!res.ok) throw new Error(json.error ?? "Update failed");
+      await onChanged();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="card p-6">
+      <h2 className="text-base font-semibold">Assigned installer</h2>
+      <p className="mt-1 text-xs text-[color:var(--text-muted)]">
+        When set, only that installer can verify in the app (scans with the
+        printed sticker QR are unchanged).
+      </p>
+      <form
+        onSubmit={save}
+        className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end"
+      >
+        <label className="block flex-1">
+          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
+            Installer
+          </span>
+          <select
+            className="input w-full"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+          >
+            <option value="">— Anyone with installer login —</option>
+            {installers.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name} ({u.email})
+              </option>
+            ))}
+          </select>
+        </label>
+        <button type="submit" className="btn btn-primary" disabled={busy}>
+          {busy ? "Saving…" : "Save"}
+        </button>
+      </form>
+      {err && (
+        <p className="mt-2 text-xs text-[color:var(--danger)]">{err}</p>
+      )}
+    </section>
+  );
+}
+
 function ItemsSection({
   projectId,
   items,
@@ -206,7 +403,13 @@ function ItemsSection({
         </div>
       </header>
 
-      {canEdit && <AddItemForm projectId={projectId} onCreated={onChanged} />}
+      {canEdit && (
+        <AddItemForm
+          projectId={projectId}
+          onCreated={onChanged}
+          existingSkus={items.map((i) => i.sku)}
+        />
+      )}
 
       {items.length === 0 ? (
         <div className="px-6 py-10 text-center text-sm text-[color:var(--text-muted)]">
@@ -249,15 +452,25 @@ function ItemsSection({
 function AddItemForm({
   projectId,
   onCreated,
+  existingSkus,
 }: {
   projectId: string;
   onCreated: () => Promise<unknown>;
+  existingSkus: string[];
 }) {
   const [sku, setSku] = useState("");
   const [name, setName] = useState("");
   const [stock, setStock] = useState("1");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [skuDirty, setSkuDirty] = useState(false);
+
+  useEffect(() => {
+    if (skuDirty || !name.trim()) return;
+    const base = skuBaseFromLabel(name);
+    const idx = nextSkuIndexForBase(base, existingSkus);
+    setSku(formatSkuSequence(base, idx));
+  }, [name, existingSkus, skuDirty]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -281,6 +494,7 @@ function AddItemForm({
       setSku("");
       setName("");
       setStock("1");
+      setSkuDirty(false);
       await onCreated();
     } catch (err) {
       setError((err as Error).message);
@@ -297,16 +511,22 @@ function AddItemForm({
       <input
         required
         className="input font-mono"
-        placeholder="SKU"
+        placeholder="SKU (auto from name)"
         value={sku}
-        onChange={(e) => setSku(e.target.value)}
+        onChange={(e) => {
+          setSkuDirty(true);
+          setSku(e.target.value);
+        }}
       />
       <input
         required
         className="input"
-        placeholder="Name (e.g. 2kW Inverter)"
+        placeholder="Name — SKU suggests from label"
         value={name}
-        onChange={(e) => setName(e.target.value)}
+        onChange={(e) => {
+          setSkuDirty(false);
+          setName(e.target.value);
+        }}
       />
       <input
         type="number"

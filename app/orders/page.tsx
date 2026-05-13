@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import useSWR from "@/lib/swr";
 import { StatusPill } from "@/components/status-pill";
 import { useAuthedUser } from "@/components/session-context";
-import type { OrderStatus } from "@/db/schema";
+import type { OrderStatus, Role } from "@/db/schema";
 
 interface OrderRow {
   id: string;
@@ -88,12 +88,12 @@ export default function OrdersPage() {
         <div>
           <h1 className="text-2xl font-semibold">Orders</h1>
           <p className="text-sm text-[color:var(--text-muted)]">
-            {role === "pm"
-              ? "Manage orders across projects. Fulfilled orders live here as a searchable ledger."
-              : "Deliveries assigned to this workspace. Open one to verify its items."}
+            {role === "installer"
+              ? "Deliveries assigned to this workspace. Open one to verify its items."
+              : "Manage orders across projects. Fulfilled orders live here as a searchable ledger."}
           </p>
         </div>
-        {role === "pm" && (
+        {(role === "pm" || role === "super_admin") && (
           <Link href="/orders/new" className="btn btn-primary self-start">
             + New Order
           </Link>
@@ -340,7 +340,7 @@ function EmptyState({
   role,
 }: {
   filter: FilterValue;
-  role: "pm" | "installer";
+  role: Role;
 }) {
   const msg =
     filter === "fulfilled"
@@ -348,9 +348,9 @@ function EmptyState({
       : filter === "anomaly"
         ? "No flagged orders. That's a good sign."
         : filter === "active"
-          ? role === "pm"
-            ? "No active orders. Create one to get started."
-            : "Nothing to verify right now. Ask your PM to create an order."
+          ? role === "installer"
+            ? "Nothing to verify right now. Ask your PM to create an order."
+            : "No active orders. Create one to get started."
           : "No orders match this filter.";
   return (
     <div className="card p-10 text-center text-sm text-[color:var(--text-muted)]">

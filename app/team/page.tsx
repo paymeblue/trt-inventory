@@ -2,8 +2,10 @@
 
 import { useMemo, useState } from "react";
 import useSWR from "@/lib/swr";
+import clsx from "clsx";
 import { useAuthedUser } from "@/components/session-context";
 import type { Role } from "@/db/schema";
+import { rolePillModifier, roleShortLabel } from "@/lib/role-label";
 
 interface TeamMember {
   id: string;
@@ -34,12 +36,12 @@ export default function TeamPage() {
 
   if (!me) return null;
 
-  if (me.role !== "pm") {
+  if (me.role !== "pm" && me.role !== "super_admin") {
     return (
       <div className="card p-6">
-        <h1 className="text-lg font-semibold">PM only</h1>
+        <h1 className="text-lg font-semibold">Restricted</h1>
         <p className="text-sm text-[color:var(--text-muted)]">
-          Only project managers can invite installers.
+          Only project managers and super admins can manage team accounts.
         </p>
       </div>
     );
@@ -164,7 +166,7 @@ export default function TeamPage() {
         </section>
       )}
 
-      <InviteForm onCreated={mutate} />
+      <InviteForm onCreated={mutate} viewerRole={me.role} />
 
       <section className="card overflow-hidden">
         <header className="border-b border-[color:var(--border)] px-6 py-4 text-sm font-semibold">
@@ -196,11 +198,9 @@ export default function TeamPage() {
                 <td className="px-6 py-3 font-mono text-xs">{u.email}</td>
                 <td className="px-6 py-3">
                   <span
-                    className={`pill ${
-                      u.role === "pm" ? "pill-active" : "pill-fulfilled"
-                    }`}
+                    className={clsx("pill", rolePillModifier(u.role))}
                   >
-                    {u.role === "pm" ? "PM" : "Installer"}
+                    {roleShortLabel(u.role)}
                   </span>
                 </td>
                 <td className="px-6 py-3 text-[color:var(--text-muted)]">
@@ -253,7 +253,13 @@ export default function TeamPage() {
   );
 }
 
-function InviteForm({ onCreated }: { onCreated: () => Promise<void> }) {
+function InviteForm({
+  onCreated,
+  viewerRole,
+}: {
+  onCreated: () => Promise<void>;
+  viewerRole: Role;
+}) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -346,6 +352,11 @@ function InviteForm({ onCreated }: { onCreated: () => Promise<void> }) {
           >
             <option value="installer">Installer (scans deliveries)</option>
             <option value="pm">Project Manager (full access)</option>
+            {viewerRole === "super_admin" ? (
+              <option value="logistics">
+                Logistics (fulfillment and activation)
+              </option>
+            ) : null}
           </select>
         </label>
 

@@ -11,7 +11,7 @@ import {
 } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import useSWR from '@/lib/swr';
+import { useQuery } from '@tanstack/react-query';
 import { useAuthedUser } from '@/components/session-context';
 import { QrCode } from '@/components/qr-code';
 import { buildScanUrl } from '@/lib/scan-url';
@@ -25,6 +25,8 @@ import {
   classifyScanResponse,
   type ScanCallResult,
 } from '@/lib/scan-client';
+import { ResourceLoadError } from '@/components/resource-load-error';
+import { fetchJson } from '@/lib/fetch-json';
 
 /**
  * The order detail API enriches each item with a signed printed-scan
@@ -112,41 +114,68 @@ export default function OrderDetailPage({
   const router = useRouter();
   const user = useAuthedUser();
 
-  const { data, mutate, error, isLoading } = useSWR<DetailResponse>(
-    `/api/orders/${id}`,
-    {
-      pollIntervalMs: 4000,
-      pollWhile: orderHasPendingScansForPoll,
-    },
-  );
-  // Scope the SKU picker / item lookups to the order's parent project —
-  // SKUs are no longer globally unique, so fetching all products would
-  // be incorrect.
-  const { data: projectData } = useSWR<ProjectDetailResponse>(
-    data?.order.projectId ? `/api/projects/${data.order.projectId}` : null,
-  );
+  const orderQuery = useQuery({
+    queryKey: ['order-detail', id],
+    queryFn: () => fetchJson<DetailResponse>(`/api/orders/${id}`),
+    refetchInterval: (query) =>
+      orderHasPendingScansForPoll(
+        query.state.data as DetailResponse | undefined,
+      )
+        ? 4000
+        : false,
+  });
+
+  const projectId = orderQuery.data?.order.projectId;
+  const projectItemsQuery = useQuery({
+    queryKey: ['project-detail', projectId],
+    queryFn: () =>
+      fetchJson<ProjectDetailResponse>(`/api/projects/${projectId!}`),
+    enabled: !!projectId,
+  });
+
+  const refresh = useCallback(async () => {
+    await Promise.all([
+      orderQuery.refetch(),
+      projectId ? projectItemsQuery.refetch() : Promise.resolve(),
+    ]);
+  }, [orderQuery, projectItemsQuery, projectId]);
 
   if (!user) return null;
 
-  if (isLoading) {
+  if (orderQuery.isPending) {
     return (
       <div className="text-sm text-[color:var(--text-muted)]">Loading…</div>
     );
   }
-  if (error || !data) {
+
+  if (orderQuery.isError || !orderQuery.data) {
     return (
-      <div className="card border-[color:var(--danger)] p-6 text-sm text-[color:var(--danger)]">
-        Could not load order. {error?.message}
-      </div>
+      <ResourceLoadError
+        title="Could not load this delivery"
+        message={
+          orderQuery.error instanceof Error
+            ? orderQuery.error.message
+            : 'Something went wrong.'
+        }
+        onRetry={() => void orderQuery.refetch()}
+        isRetrying={orderQuery.isFetching}
+      />
     );
   }
+
+  const data = orderQuery.data;
+  const projectData = projectItemsQuery.data;
 
   const anyScanned = data.items.some((i) => i.scannedAt !== null);
   const canEdit =
     user.role === 'pm' && data.order.status !== 'fulfilled' && !anyScanned;
+  const assignedInstallerId = data.project?.installerUserId ?? null;
+  const isAssignedInstaller =
+    !assignedInstallerId || assignedInstallerId === user.id;
   const canScan =
     user.role === 'installer' &&
-    (data.order.status === 'active' || data.order.status === 'anomaly');
+    (data.order.status === 'active' || data.order.status === 'anomaly') &&
+    isAssignedInstaller;
 
   const projectItems = projectData?.items ?? [];
   const productByKey = new Map<string, Product>();
@@ -223,15 +252,28 @@ export default function OrderDetailPage({
           items={data.items}
           products={projectItems}
           productByKey={productByKey}
-          refresh={mutate}
+          refresh={refresh}
           canEdit={canEdit}
         />
+      ) : user.role === 'installer' &&
+        !isAssignedInstaller &&
+        (data.order.status === 'active' ||
+          data.order.status === 'anomaly') ? (
+        <div className="card border-[color:var(--warning)] bg-amber-50 p-6 text-sm dark:bg-amber-950/30">
+          <p className="font-semibold text-[color:var(--text)]">
+            Another installer is assigned to this project
+          </p>
+          <p className="mt-2 text-[color:var(--text-muted)]">
+            Ask your PM to assign you on the project page, or verify using the
+            printed QR code on the box (phone camera — no login required).
+          </p>
+        </div>
       ) : canScan ? (
         <InstallerView
           orderId={data.order.id}
           items={data.items}
           productByKey={productByKey}
-          refresh={mutate}
+          refresh={refresh}
         />
       ) : (
         <ReadOnlyItems items={data.items} productByKey={productByKey} />
@@ -301,6 +343,7 @@ function PmView({
   canEdit: boolean;
 }) {
   const [productId, setProductId] = useState('');
+  const [quantity, setQuantity] = useState(1);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -327,11 +370,7 @@ function PmView({
     },
   ];
 
-  const usedSkus = useMemo(
-    () => new Set(items.map((i) => i.productId)),
-    [items],
-  );
-  const available = products.filter((p) => !usedSkus.has(p.sku));
+  const available = products;
 
   async function addItem(e: React.FormEvent) {
     e.preventDefault();
@@ -341,11 +380,12 @@ function PmView({
       const res = await fetch(`/api/orders/${order.id}/items`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ productId: productId.trim() }),
+        body: JSON.stringify({ productId: productId.trim(), quantity }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Failed to add item');
       setProductId('');
+      setQuantity(1);
       await refresh();
     } catch (err) {
       setError((err as Error).message);
@@ -372,32 +412,52 @@ function PmView({
         <section className="card no-print p-6" data-tour="pm-add-item">
           <h2 className="text-base font-semibold">Adjust items on this order</h2>
           <p className="mt-1 text-xs text-[color:var(--text-muted)]">
-            New orders include every SKU from the project. Add any SKUs you
-            created later, or leave this section alone. You can remove lines
-            until the first scan.
+            Add lines for the same SKU multiple times (e.g. 10 boxes) — each gets
+            its own barcode. Remove lines you are not shipping until the first
+            scan.
           </p>
           <form
             onSubmit={addItem}
-            className="mt-4 flex flex-col gap-2 sm:flex-row"
+            className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap"
           >
             <select
-              className="input"
+              className="input min-w-[12rem] flex-1"
               value={productId}
               onChange={(e) => setProductId(e.target.value)}
               required
             >
-              <option value="">— Add another project SKU —</option>
+              <option value="">— Add project SKU lines —</option>
               {available.map((p) => (
                 <option key={p.id} value={p.sku}>
                   {p.sku} — {p.name} (stock: {p.stockQuantity})
                 </option>
               ))}
             </select>
+            <div className="flex items-center gap-2">
+              <label className="flex items-center gap-1 text-xs text-[color:var(--text-muted)]">
+                Qty
+                <input
+                  type="number"
+                  min={1}
+                  max={99}
+                  className="input w-20 text-right"
+                  value={quantity}
+                  onChange={(e) =>
+                    setQuantity(
+                      Math.min(
+                        99,
+                        Math.max(1, Number.parseInt(e.target.value, 10) || 1),
+                      ),
+                    )
+                  }
+                />
+              </label>
+            </div>
             <button
               className="btn btn-primary"
               disabled={busy || !productId.trim()}
             >
-              {busy ? 'Adding…' : 'Add item'}
+              {busy ? 'Adding…' : 'Add lines'}
             </button>
           </form>
           {products.length === 0 && (
@@ -409,12 +469,6 @@ function PmView({
               >
                 Add one →
               </Link>
-            </p>
-          )}
-          {available.length === 0 && products.length > 0 && (
-            <p className="mt-3 text-xs text-[color:var(--text-muted)]">
-              Every project SKU is already on this order. Remove a line if you
-              are not shipping it, or add new SKUs on the project page first.
             </p>
           )}
           {error && (
@@ -470,7 +524,7 @@ function InstallerView({
     | null
   >(null);
   const [transportError, setTransportError] = useState<{
-    kind: 'network' | 'auth' | 'server' | 'conflict';
+    kind: 'network' | 'auth' | 'forbidden' | 'server' | 'conflict';
     message: string;
     at: number;
   } | null>(null);
@@ -622,6 +676,10 @@ function InstallerView({
       <div className="grid gap-6 lg:grid-cols-5">
         {/* Left column: scanner + outcome + history */}
         <div className="space-y-4 lg:col-span-3">
+          {pending.length > 0 && (
+            <DemoBarcodeStrip barcodes={pending.map((it) => it.barcode)} />
+          )}
+
           <TrackCards
             total={items.length}
             resolved={resolved.length}
@@ -761,6 +819,47 @@ function InstallerView({
   );
 }
 
+// ---------------------------------------------------------------------------
+// Installer demo: show pending barcodes for rehearsal (labels replace these).
+// ---------------------------------------------------------------------------
+
+function DemoBarcodeStrip({ barcodes }: { barcodes: string[] }) {
+  if (barcodes.length === 0) return null;
+  return (
+    <div className="card no-print border-dashed border-[color:var(--border)] bg-[color:var(--surface-muted)] p-4 text-xs">
+      <div className="font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
+        Demo — barcodes to scan
+      </div>
+      <p className="mt-1 text-[color:var(--text-muted)]">
+        For rehearsals only. Real runs use printed labels on the box.
+      </p>
+      <ul className="mt-3 space-y-1.5 font-mono text-[11px]">
+        {barcodes.map((b) => (
+          <li
+            key={b}
+            className="flex items-center justify-between gap-2 rounded-md bg-[color:var(--surface)] px-2 py-1"
+          >
+            <span className="min-w-0 truncate">{b}</span>
+            <button
+              type="button"
+              className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--primary)] hover:underline"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(b);
+                } catch {
+                  // ignore
+                }
+              }}
+            >
+              Copy
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function TrackCards({
   total,
   resolved,
@@ -889,18 +988,24 @@ function TransportErrorCard({
   error,
   onDismiss,
 }: {
-  error: { kind: 'network' | 'auth' | 'server' | 'conflict'; message: string };
+  error: {
+    kind: 'network' | 'auth' | 'forbidden' | 'server' | 'conflict';
+    message: string;
+  };
   onDismiss: () => void;
 }) {
   const label: Record<typeof error.kind, string> = {
     network: "Can't reach the server",
     auth: 'Your session expired',
+    forbidden: 'Not allowed for this login',
     server: 'Server error',
     conflict: 'Order conflict',
   };
   const hint: Record<typeof error.kind, string> = {
     network: 'Check your internet connection and try the scan again.',
     auth: 'Taking you back to the login screen…',
+    forbidden:
+      'Ask your PM to assign this project to you, or scan the printed QR on the box.',
     server: "The scan wasn't recorded. Please retry — nothing was changed.",
     conflict: 'Something about this order changed. The item was NOT deducted.',
   };

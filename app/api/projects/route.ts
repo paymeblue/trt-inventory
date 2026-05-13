@@ -1,8 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { asc, count, eq, sql } from "drizzle-orm";
+import { asc, count, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { orders, products, projects, stockMovements } from "@/db/schema";
-import { requireUser } from "@/lib/auth-guard";
+import { requireUser, requireUserAny } from "@/lib/auth-guard";
 import { handleError, jsonError } from "@/lib/api";
 import {
   getPostgresErrorMeta,
@@ -33,17 +33,37 @@ export async function GET(req: NextRequest) {
     const forNewOrder =
       req.nextUrl.searchParams.get("forNewOrder") === "1" ||
       req.nextUrl.searchParams.get("forNewOrder") === "true";
-    const [projectRows, itemRollups, orderRollups] = await Promise.all([
-      db
-        .select({
-          id: projects.id,
-          name: projects.name,
-          description: projects.description,
-          archivedAt: projects.archivedAt,
-          createdAt: projects.createdAt,
-        })
-        .from(projects)
-        .orderBy(asc(projects.name)),
+    const { actor } = auth;
+    const whereRole =
+      actor.role === "installer"
+        ? eq(projects.approvalStatus, "active")
+        : actor.role === "logistics"
+          ? inArray(projects.approvalStatus, [
+              "pending_logistics",
+              "active",
+            ])
+          : undefined;
+
+    const baseSelect = {
+      id: projects.id,
+      name: projects.name,
+      description: projects.description,
+      archivedAt: projects.archivedAt,
+      createdAt: projects.createdAt,
+      approvalStatus: projects.approvalStatus,
+    };
+
+    const projectRows = whereRole
+      ? await db
+          .select(baseSelect)
+          .from(projects)
+          .where(whereRole)
+          .orderBy(asc(projects.name))
+      : await db
+          .select(baseSelect)
+          .from(projects)
+          .orderBy(asc(projects.name));
+    const [itemRollups, orderRollups] = await Promise.all([
       db
         .select({
           projectId: products.projectId,
@@ -75,7 +95,10 @@ export async function GET(req: NextRequest) {
     let payload = enriched;
     if (forNewOrder) {
       const blocked = await findProjectIdsBlockedForNewOrder();
-      payload = enriched.filter((p) => !blocked.has(p.id));
+      payload = enriched.filter(
+        (p) =>
+          !blocked.has(p.id) && p.approvalStatus === "active",
+      );
     }
 
     return NextResponse.json({ projects: payload });
@@ -92,7 +115,7 @@ export async function GET(req: NextRequest) {
  * outright if the client sends duplicate SKUs in the same payload.
  */
 export async function POST(req: NextRequest) {
-  const auth = await requireUser("pm");
+  const auth = await requireUserAny(["pm", "super_admin"]);
   if ("error" in auth) return auth.error;
   try {
     let raw: unknown;
@@ -128,6 +151,10 @@ export async function POST(req: NextRequest) {
             name: body.name,
             description: body.description ?? null,
             createdById: auth.actor.userId,
+            approvalStatus:
+              auth.actor.role === "super_admin"
+                ? "active"
+                : "pending_super_admin",
           })
           .returning();
 

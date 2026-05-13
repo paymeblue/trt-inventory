@@ -1,6 +1,8 @@
 import { relations } from "drizzle-orm";
 import {
+  boolean,
   integer,
+  jsonb,
   pgEnum,
   pgTable,
   text,
@@ -17,8 +19,23 @@ export const orderStatusEnum = pgEnum("order_status", [
 ]);
 export type OrderStatus = (typeof orderStatusEnum.enumValues)[number];
 
-export const roleEnum = pgEnum("user_role", ["pm", "installer"]);
+export const roleEnum = pgEnum("user_role", [
+  "pm",
+  "installer",
+  "logistics",
+  "super_admin",
+]);
 export type Role = (typeof roleEnum.enumValues)[number];
+
+export const projectApprovalStatusEnum = pgEnum("project_approval_status", [
+  "pending_super_admin",
+  "rejected_super_admin",
+  "pending_logistics",
+  "rejected_logistics",
+  "active",
+]);
+export type ProjectApprovalStatus =
+  (typeof projectApprovalStatusEnum.enumValues)[number];
 
 export const users = pgTable(
   "users",
@@ -63,6 +80,13 @@ export const projects = pgTable(
     name: text("name").notNull(),
     description: text("description"),
     createdById: uuid("created_by_id").references(() => users.id),
+    /**
+     * When set, only this installer may perform authenticated in-app scans
+     * for orders under the project. Sticker-token QR scans are unchanged.
+     */
+    installerUserId: uuid("installer_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -70,6 +94,19 @@ export const projects = pgTable(
       .defaultNow()
       .notNull(),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
+    /**
+     * Gates visibility for installers and orders until logistics marks active.
+     */
+    approvalStatus: projectApprovalStatusEnum("approval_status")
+      .notNull()
+      .default("active"),
+    /**
+     * PM-proposed edits while the project is live; applies only after logistics
+     * confirms (see POST …/approval).
+     */
+    pendingPatch: jsonb("pending_patch").$type<Record<string, unknown> | null>(),
+    /** Logistics-level project sticker; minted when super-admin approves. */
+    projectBarcode: text("project_barcode"),
   },
   (t) => [uniqueIndex("projects_name_unique").on(t.name)],
 );
@@ -102,6 +139,12 @@ export const orders = pgTable("orders", {
     .notNull()
     .references(() => projects.id, { onDelete: "restrict" }),
   status: orderStatusEnum("status").notNull().default("draft"),
+  /**
+   * Exactly one gate order may exist per project (partial unique index in SQL).
+   * Seeded when super-admin approves; logistics scans lines here before activate.
+   * Same stickers are later scanned on-site by installers (stock decrement).
+   */
+  isLogisticsGate: boolean("is_logistics_gate").notNull().default(false),
   createdBy: text("created_by").notNull(),
   createdById: uuid("created_by_id").references(() => users.id),
   createdAt: timestamp("created_at", { withTimezone: true })
@@ -130,13 +173,17 @@ export const orderItems = pgTable(
     scannedAt: timestamp("scanned_at", { withTimezone: true }),
     scannedBy: text("scanned_by"),
     scannedById: uuid("scanned_by_id").references(() => users.id),
+    /** Warehouse scan before project activation (no stock movement). */
+    logisticsScannedAt: timestamp("logistics_scanned_at", { withTimezone: true }),
+    logisticsScannedBy: text("logistics_scanned_by"),
+    logisticsScannedById: uuid("logistics_scanned_by_id").references(() => users.id),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
   },
   (t) => [
     uniqueIndex("order_items_barcode_unique").on(t.barcode),
-    uniqueIndex("order_items_order_product_unique").on(t.orderId, t.productId),
+    /** Multiple physical lines may share the same product SKU (e.g. 10 boxes). */
   ],
 );
 
@@ -162,6 +209,10 @@ export const projectsRelations = relations(projects, ({ many, one }) => ({
   orders: many(orders),
   createdByUser: one(users, {
     fields: [projects.createdById],
+    references: [users.id],
+  }),
+  assignedInstaller: one(users, {
+    fields: [projects.installerUserId],
     references: [users.id],
   }),
 }));

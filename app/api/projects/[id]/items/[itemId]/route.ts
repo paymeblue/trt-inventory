@@ -3,7 +3,7 @@ import { z } from "zod";
 import { and, eq, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { orderItems, orders, products, stockMovements } from "@/db/schema";
-import { requireUser } from "@/lib/auth-guard";
+import { requireUserAny } from "@/lib/auth-guard";
 import { handleError, jsonError } from "@/lib/api";
 
 /**
@@ -53,7 +53,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; itemId: string }> },
 ) {
-  const auth = await requireUser("pm");
+  const auth = await requireUserAny(["pm", "super_admin"]);
   if ("error" in auth) return auth.error;
   try {
     const { id: projectId, itemId } = await params;
@@ -133,7 +133,7 @@ export async function DELETE(
   _req: Request,
   { params }: { params: Promise<{ id: string; itemId: string }> },
 ) {
-  const auth = await requireUser("pm");
+  const auth = await requireUserAny(["pm", "super_admin"]);
   if ("error" in auth) return auth.error;
   try {
     const { id: projectId, itemId } = await params;

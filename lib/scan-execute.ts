@@ -16,7 +16,11 @@ export type ScanExecuteError =
   | { kind: "order_not_found" }
   | { kind: "order_fulfilled" }
   | { kind: "sku_deleted"; sku: string }
-  | { kind: "insufficient_stock"; sku: string };
+  | { kind: "insufficient_stock"; sku: string }
+  /** Logged-in installer is not the project-assigned installer (QR sticker scans excluded). */
+  | { kind: "installer_not_assigned" }
+  /** Gate-order line must be scanned in the warehouse before on-site scans. */
+  | { kind: "logistics_not_verified"; sku: string };
 
 export interface ScanExecuteSuccess {
   kind: "ok";
@@ -61,6 +65,18 @@ export async function executeScan({
     if (!order) return { kind: "order_not_found" };
     if (order.status === "fulfilled") return { kind: "order_fulfilled" };
 
+    const project = await tx.query.projects.findFirst({
+      where: eq(projects.id, order.projectId),
+      columns: { installerUserId: true },
+    });
+    if (
+      project?.installerUserId &&
+      !actor.isPrintedScan &&
+      actor.userId !== project.installerUserId
+    ) {
+      return { kind: "installer_not_assigned" };
+    }
+
     await tx.execute(sql`
       SELECT id FROM order_items
       WHERE order_id = ${orderId}::uuid AND barcode = ${barcode}
@@ -82,6 +98,16 @@ export async function executeScan({
 
     if (outcome.result === "valid") {
       const matched = items.find((i) => i.id === outcome.itemId)!;
+      if (
+        order.isLogisticsGate &&
+        (matched.logisticsScannedAt === null ||
+          matched.logisticsScannedAt === undefined)
+      ) {
+        return {
+          kind: "logistics_not_verified",
+          sku: matched.productId,
+        };
+      }
       sku = matched.productId;
 
       // Synthetic "Printed sticker" actor isn't a real users row — its

@@ -2,7 +2,7 @@ import "../lib/load-env";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import * as schema from "../db/schema";
 import { hashPassword } from "../lib/password";
 
@@ -73,6 +73,63 @@ async function main() {
     console.log(
       "SEED_PM_EMAIL / SEED_PM_PASSWORD not set; no user seeded.",
     );
+  }
+
+  /**
+   * Optional bootstrap for `super_admin` (approvals queue + can invite logistics on Team).
+   * - If that email already exists: set role to super_admin; if password is set (min 8 chars),
+   *   also rotate the hash from env (dev/bootstrap only).
+   * - If the email does not exist: create a new user when BOOTSTRAP_SUPER_ADMIN_PASSWORD is set.
+   *
+   * Omit this block in production or leave env vars unset.
+   */
+  const saEmailRaw = process.env.BOOTSTRAP_SUPER_ADMIN_EMAIL?.trim();
+  const saPassword = process.env.BOOTSTRAP_SUPER_ADMIN_PASSWORD;
+  const saName = process.env.BOOTSTRAP_SUPER_ADMIN_NAME ?? "Super Admin";
+
+  if (saEmailRaw) {
+    const saEmail = saEmailRaw.toLowerCase();
+    const existingSa = await db.query.users.findFirst({
+      where: eq(schema.users.email, saEmail),
+    });
+
+    if (existingSa) {
+      const updates: {
+        role: "super_admin";
+        passwordHash?: string;
+      } = { role: "super_admin" };
+      if (saPassword) {
+        if (saPassword.length < 8) {
+          console.log(
+            "BOOTSTRAP_SUPER_ADMIN_PASSWORD must be at least 8 characters; role promoted without password change.",
+          );
+        } else {
+          updates.passwordHash = await hashPassword(saPassword);
+        }
+      }
+      await db
+        .update(schema.users)
+        .set(updates)
+        .where(eq(schema.users.id, existingSa.id));
+      console.log(
+        `Bootstrap: ${saEmail} is now super_admin${
+          updates.passwordHash ? " (password updated from env)" : ""
+        }.`,
+      );
+    } else if (saPassword && saPassword.length >= 8) {
+      const passwordHash = await hashPassword(saPassword);
+      await db.insert(schema.users).values({
+        email: saEmail,
+        passwordHash,
+        role: "super_admin",
+        name: saName,
+      });
+      console.log(`Bootstrap: created super_admin ${saEmail}.`);
+    } else {
+      console.log(
+        `Bootstrap: no user '${saEmail}'. Set BOOTSTRAP_SUPER_ADMIN_PASSWORD (min 8 chars) to create one, or use an email that already exists.`,
+      );
+    }
   }
 
   await client.end();

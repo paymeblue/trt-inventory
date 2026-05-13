@@ -3,7 +3,7 @@ import { z } from "zod";
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { users } from "@/db/schema";
-import { requireUser } from "@/lib/auth-guard";
+import { requireUserAny } from "@/lib/auth-guard";
 import { hashPassword } from "@/lib/password";
 import { handleError, jsonError } from "@/lib/api";
 
@@ -11,11 +11,13 @@ const createSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
   name: z.string().trim().min(1).max(120),
   password: z.string().min(8, "Password must be at least 8 characters").max(200),
-  role: z.enum(["pm", "installer"]).default("installer"),
+  role: z
+    .enum(["pm", "installer", "logistics", "super_admin"])
+    .default("installer"),
 });
 
 export async function GET() {
-  const auth = await requireUser("pm");
+  const auth = await requireUserAny(["pm", "super_admin"]);
   if ("error" in auth) return auth.error;
   try {
     const rows = await db
@@ -37,10 +39,20 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = await requireUser("pm");
+  const auth = await requireUserAny(["pm", "super_admin"]);
   if ("error" in auth) return auth.error;
   try {
     const body = createSchema.parse(await req.json());
+
+    if (
+      auth.actor.role === "pm" &&
+      (body.role === "logistics" || body.role === "super_admin")
+    ) {
+      return jsonError(
+        403,
+        "Only super-admin can create logistics or super-admin accounts",
+      );
+    }
 
     const existing = await db.query.users.findFirst({
       where: eq(users.email, body.email),

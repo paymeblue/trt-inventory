@@ -14,6 +14,8 @@ export type ScanCallResult =
       stock?: { sku: string; stockQuantity: number };
     }
   | { kind: "auth"; message: string }
+  /** 403 — wrong role or not the assigned installer (sticker scans unaffected). */
+  | { kind: "forbidden"; message: string }
   | { kind: "conflict"; message: string }
   | { kind: "server"; status: number; message: string }
   | { kind: "network"; message: string };
@@ -44,8 +46,11 @@ export function classifyScanResponse(
   const err = body as ScanApiErrorBody;
   const message = err.error ?? `Unexpected error (HTTP ${response.status})`;
 
-  if (response.status === 401 || response.status === 403) {
+  if (response.status === 401) {
     return { kind: "auth", message };
+  }
+  if (response.status === 403) {
+    return { kind: "forbidden", message };
   }
   if (response.status === 404 || response.status === 409) {
     return { kind: "conflict", message };

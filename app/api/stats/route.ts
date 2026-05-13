@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { desc, sql } from "drizzle-orm";
+import { desc, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { orderItems, orders, products, projects } from "@/db/schema";
 import { requireUser } from "@/lib/auth-guard";
@@ -40,6 +40,17 @@ export async function GET() {
       })
       .from(projects);
 
+    const [logisticsProjectCounts] =
+      auth.actor.role === "logistics"
+        ? await db
+            .select({
+              awaitingReview: sql<number>`count(*) filter (where ${projects.approvalStatus} = 'pending_logistics')::int`,
+              approvedLive: sql<number>`count(*) filter (where ${projects.approvalStatus} = 'active')::int`,
+            })
+            .from(projects)
+            .where(isNull(projects.archivedAt))
+        : [{ awaitingReview: 0 as number, approvedLive: 0 as number }];
+
     const recent = await db.query.orders.findMany({
       with: { items: true, project: true },
       orderBy: [desc(orders.createdAt)],
@@ -51,6 +62,13 @@ export async function GET() {
       items: itemCounts,
       inventory,
       projects: projectCounts,
+      logisticsProjects:
+        auth.actor.role === "logistics"
+          ? {
+              awaitingReview: logisticsProjectCounts.awaitingReview,
+              approvedLive: logisticsProjectCounts.approvedLive,
+            }
+          : undefined,
       recent: recent.map((o) => ({
         id: o.id,
         projectId: o.projectId,

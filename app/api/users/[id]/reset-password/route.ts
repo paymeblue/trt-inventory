@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { users } from "@/db/schema";
-import { requireUser } from "@/lib/auth-guard";
+import { requireUserAny } from "@/lib/auth-guard";
 import { hashPassword } from "@/lib/password";
 import { generateTempPassword } from "@/lib/temp-password";
 import { handleError, jsonError } from "@/lib/api";
@@ -23,7 +23,7 @@ export async function POST(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireUser("pm");
+  const auth = await requireUserAny(["pm", "super_admin"]);
   if ("error" in auth) return auth.error;
   try {
     const { id } = await params;

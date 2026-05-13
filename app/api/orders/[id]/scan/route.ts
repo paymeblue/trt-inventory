@@ -44,6 +44,19 @@ async function handlePost(
         `No on-hand stock left for SKU "${result.sku}". Add stock on the project before verifying this line.`,
       );
     }
+    if (result.kind === "installer_not_assigned") {
+      return jsonError(
+        403,
+        "Only the installer assigned to this project may verify with this login. Use the sticker QR on the box, or ask your PM to assign you.",
+      );
+    }
+
+    if (result.kind === "logistics_not_verified") {
+      return jsonError(
+        403,
+        `Logistics must scan this item at the warehouse first (SKU ${result.sku}). Open the project's logistics scanning page.`,
+      );
+    }
 
     return NextResponse.json({
       outcome: result.outcome,

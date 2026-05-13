@@ -1,15 +1,23 @@
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { db } from "@/db";
 import { orderItems, orders } from "@/db/schema";
 
 /**
- * A project may only receive a **new** order while it has no fulfillment
- * history: no fulfilled order, and no order line that has ever been verified
- * (scanned). Otherwise creating another order would re-seed all SKUs and
- * verifications could decrement project stock past zero.
+ * A project may only receive a **new** order while it has no open shipment
+ * snapshot, no fulfilled orders, and no on-site verified line (`scanned_at`).
+ * Otherwise creating another order would collide with the logistics gate order
+ * or re-seed SKUs incorrectly.
  */
 export async function findProjectIdsBlockedForNewOrder(): Promise<Set<string>> {
   const blocked = new Set<string>();
+
+  const activeRows = await db
+    .select({ projectId: orders.projectId })
+    .from(orders)
+    .where(inArray(orders.status, ["draft", "active", "anomaly"]))
+    .groupBy(orders.projectId);
+
+  for (const r of activeRows) blocked.add(r.projectId);
 
   const fulfilledRows = await db
     .select({ projectId: orders.projectId })
@@ -34,6 +42,19 @@ export async function findProjectIdsBlockedForNewOrder(): Promise<Set<string>> {
 export async function isProjectEligibleForNewOrder(
   projectId: string,
 ): Promise<boolean> {
+  const [activeOrPending] = await db
+    .select({ id: orders.id })
+    .from(orders)
+    .where(
+      and(
+        eq(orders.projectId, projectId),
+        inArray(orders.status, ["draft", "active", "anomaly"]),
+      ),
+    )
+    .limit(1);
+
+  if (activeOrPending) return false;
+
   const [fulfilled] = await db
     .select({ id: orders.id })
     .from(orders)

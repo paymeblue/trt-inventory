@@ -9,7 +9,9 @@ import {
   PlusCircleIcon,
   QrCodeIcon,
   ScaleIcon,
+  ShieldCheckIcon,
   Squares2X2Icon,
+  TruckIcon,
   UserGroupIcon,
 } from "@heroicons/react/24/outline";
 import Link from "next/link";
@@ -36,25 +38,25 @@ const navMain: NavItem[] = [
     href: "/",
     label: "Dashboard",
     Icon: Squares2X2Icon,
-    roles: ["pm", "installer"],
+    roles: ["pm", "installer", "super_admin", "logistics"],
   },
   {
     href: "/projects",
     label: "Projects",
     Icon: FolderIcon,
-    roles: ["pm", "installer"],
+    roles: ["pm", "installer", "super_admin", "logistics"],
   },
   {
     href: "/orders",
     label: "Orders",
     Icon: ClipboardDocumentListIcon,
-    roles: ["pm", "installer"],
+    roles: ["pm", "installer", "super_admin", "logistics"],
   },
   {
     href: "/orders/new",
     label: "New Order",
     Icon: PlusCircleIcon,
-    roles: ["pm"],
+    roles: ["pm", "super_admin"],
   },
   {
     href: "/scan",
@@ -66,7 +68,19 @@ const navMain: NavItem[] = [
     href: "/team",
     label: "Team",
     Icon: UserGroupIcon,
-    roles: ["pm"],
+    roles: ["pm", "super_admin"],
+  },
+  {
+    href: "/approvals/super-admin",
+    label: "Pending approval (SA)",
+    Icon: ShieldCheckIcon,
+    roles: ["super_admin"],
+  },
+  {
+    href: "/approvals/logistics",
+    label: "Awaiting logistics",
+    Icon: TruckIcon,
+    roles: ["logistics"],
   },
 ];
 
@@ -197,9 +211,12 @@ export function Sidebar() {
             prior verifications or fulfilled orders.
           </p>
           <p className="mt-1.5">
-            <strong className="text-[color:var(--text)]">Installer:</strong>{" "}
-            verify deliveries only; sticker URLs can verify without login when
-            signed.
+            <strong className="text-[color:var(--text)]">Logistics:</strong>{" "}
+            fulfillment queue and project activation after super-admin approval.
+          </p>
+          <p className="mt-1.5">
+            <strong className="text-[color:var(--text)]">Super admin:</strong>{" "}
+            approves new projects before they reach logistics and installers.
           </p>
         </section>
 

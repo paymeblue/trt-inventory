@@ -2,15 +2,42 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { and, asc, eq, ne } from "drizzle-orm";
 import { db } from "@/db";
-import { orders, products, projects } from "@/db/schema";
-import { requireUser } from "@/lib/auth-guard";
+import { orders, products, projects, users } from "@/db/schema";
+import { requireUser, requireUserAny } from "@/lib/auth-guard";
 import { handleError, jsonError } from "@/lib/api";
 import { isProjectEligibleForNewOrder } from "@/lib/project-new-order-eligibility";
 
 const updateSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   description: z.string().trim().max(500).nullable().optional(),
+  installerUserId: z.string().uuid().nullable().optional(),
 });
+
+type PendingPatch = {
+  name?: string;
+  description?: string | null;
+  installerUserId?: string | null;
+};
+
+function mergePending(
+  current: unknown,
+  incoming: { name?: string; description?: string | null; installerUserId?: string | null },
+): PendingPatch {
+  const base =
+    current && typeof current === "object"
+      ? (current as PendingPatch)
+      : {};
+  return {
+    ...base,
+    ...(incoming.name !== undefined ? { name: incoming.name } : {}),
+    ...(incoming.description !== undefined
+      ? { description: incoming.description }
+      : {}),
+    ...(incoming.installerUserId !== undefined
+      ? { installerUserId: incoming.installerUserId }
+      : {}),
+  };
+}
 
 /**
  * GET /api/projects/[id] → full project detail: the project row, its
@@ -28,6 +55,15 @@ export async function GET(
       where: eq(projects.id, id),
     });
     if (!project) return jsonError(404, "Project not found");
+    if (
+      auth.actor.role === "installer" &&
+      project.approvalStatus !== "active"
+    ) {
+      return jsonError(
+        403,
+        "This project is not visible until logistics marks it active.",
+      );
+    }
 
     const [items, projectOrders] = await Promise.all([
       db
@@ -63,7 +99,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireUser("pm");
+  const auth = await requireUserAny(["pm", "super_admin"]);
   if ("error" in auth) return auth.error;
   try {
     const { id } = await params;
@@ -83,12 +119,59 @@ export async function PATCH(
       }
     }
 
+    if (body.installerUserId !== undefined && body.installerUserId !== null) {
+      const inst = await db.query.users.findFirst({
+        where: eq(users.id, body.installerUserId),
+        columns: { id: true, role: true },
+      });
+      if (!inst) return jsonError(400, "That user does not exist");
+      if (inst.role !== "installer") {
+        return jsonError(400, "Project installer must be a user with the installer role");
+      }
+    }
+
+    const hasIncoming =
+      body.name !== undefined ||
+      body.description !== undefined ||
+      body.installerUserId !== undefined;
+    if (!hasIncoming) {
+      return jsonError(400, "No fields to update");
+    }
+
+    if (
+      (existing.approvalStatus === "active" ||
+        existing.approvalStatus === "pending_logistics") &&
+      hasIncoming
+    ) {
+      const merged = mergePending(existing.pendingPatch, {
+        ...(body.name !== undefined ? { name: body.name } : {}),
+        ...(body.description !== undefined
+          ? { description: body.description ?? null }
+          : {}),
+        ...(body.installerUserId !== undefined
+          ? { installerUserId: body.installerUserId }
+          : {}),
+      });
+      const [updated] = await db
+        .update(projects)
+        .set({
+          pendingPatch: merged,
+          updatedAt: new Date(),
+        })
+        .where(eq(projects.id, id))
+        .returning();
+      return NextResponse.json({ project: updated });
+    }
+
     const [updated] = await db
       .update(projects)
       .set({
         ...(body.name !== undefined ? { name: body.name } : {}),
         ...(body.description !== undefined
           ? { description: body.description ?? null }
+          : {}),
+        ...(body.installerUserId !== undefined
+          ? { installerUserId: body.installerUserId }
           : {}),
         updatedAt: new Date(),
       })
@@ -112,7 +195,7 @@ export async function DELETE(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireUser("pm");
+  const auth = await requireUserAny(["pm", "super_admin"]);
   if ("error" in auth) return auth.error;
   try {
     const { id } = await params;

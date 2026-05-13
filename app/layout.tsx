@@ -6,6 +6,7 @@ import { getSessionUser } from "@/lib/session-user";
 import { themeBootstrapScript } from "@/lib/theme";
 import { SessionProvider } from "@/components/session-context";
 import { ThemeProvider } from "@/components/theme-context";
+import { QueryProvider } from "@/app/providers";
 import { Sidebar } from "@/components/sidebar";
 import { Topbar } from "@/components/topbar";
 
@@ -44,21 +45,23 @@ export default async function RootLayout({
       </head>
       <body className="min-h-full" suppressHydrationWarning>
         <ThemeProvider>
-          <SessionProvider initialUser={user}>
-            {user ? (
-              <div className="flex min-h-screen">
-                <Sidebar />
-                <div className="flex flex-1 flex-col">
-                  <Topbar />
-                  <main className="flex-1 px-6 py-6 md:px-10 md:py-8">
-                    {children}
-                  </main>
+          <QueryProvider>
+            <SessionProvider initialUser={user}>
+              {user ? (
+                <div className="flex min-h-screen">
+                  <Sidebar />
+                  <div className="flex flex-1 flex-col">
+                    <Topbar />
+                    <main className="flex-1 px-6 py-6 md:px-10 md:py-8">
+                      {children}
+                    </main>
+                  </div>
                 </div>
-              </div>
-            ) : (
-              children
-            )}
-          </SessionProvider>
+              ) : (
+                children
+              )}
+            </SessionProvider>
+          </QueryProvider>
         </ThemeProvider>
       </body>
     </html>
