@@ -1,8 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchJson } from "@/lib/fetch-json";
+import { packingLineCountForStock } from "@/lib/packing-lines";
 import { invalidateAllApprovalSurface, queryKeys } from "@/lib/query-keys";
 import { useAuthedUser } from "@/components/session-context";
 
@@ -13,9 +15,22 @@ interface QueueRow {
   createdAt: string;
 }
 
+interface ProjectItemRow {
+  sku: string;
+  name: string;
+  stockQuantity: number;
+}
+
+interface ProjectDetailPayload {
+  project: { id: string; name: string; approvalStatus: string };
+  items: ProjectItemRow[];
+}
+
 export default function SuperAdminApprovalsPage() {
   const user = useAuthedUser();
   const qc = useQueryClient();
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const [approveTargetId, setApproveTargetId] = useState<string | null>(null);
 
   const { data, isPending, error, refetch } = useQuery({
     queryKey: queryKeys.approvalsSa,
@@ -26,6 +41,25 @@ export default function SuperAdminApprovalsPage() {
     enabled: user?.role === "super_admin",
   });
 
+  const approvePreviewQuery = useQuery({
+    queryKey: approveTargetId
+      ? queryKeys.projectDetail(approveTargetId)
+      : ["project-detail", "idle"],
+    queryFn: () =>
+      fetchJson<ProjectDetailPayload>(`/api/projects/${approveTargetId}`),
+    enabled: !!approveTargetId,
+  });
+
+  const previewRows = useMemo(() => {
+    const items = approvePreviewQuery.data?.items ?? [];
+    return items.map((it) => ({
+      ...it,
+      lines: packingLineCountForStock(it.stockQuantity),
+    }));
+  }, [approvePreviewQuery.data?.items]);
+
+  const totalPackingLines = previewRows.reduce((s, r) => s + r.lines, 0);
+
   const act = useMutation({
     mutationFn: async (vars: { id: string; action: string }) =>
       fetchJson<{ project: { id: string } }>(`/api/projects/${vars.id}/approval`, {
@@ -33,8 +67,24 @@ export default function SuperAdminApprovalsPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: vars.action }),
       }),
-    onSuccess: () => invalidateAllApprovalSurface(qc),
+    onSuccess: async () => {
+      await invalidateAllApprovalSurface(qc);
+      setApproveTargetId(null);
+    },
   });
+
+  useEffect(() => {
+    if (approveTargetId) cancelRef.current?.focus();
+  }, [approveTargetId]);
+
+  useEffect(() => {
+    if (!approveTargetId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setApproveTargetId(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [approveTargetId]);
 
   if (!user) return null;
   if (user.role !== "super_admin") {
@@ -96,9 +146,7 @@ export default function SuperAdminApprovalsPage() {
                   type="button"
                   className="btn btn-primary btn-sm"
                   disabled={act.isPending}
-                  onClick={() =>
-                    act.mutate({ id: p.id, action: "super_admin_approve" })
-                  }
+                  onClick={() => setApproveTargetId(p.id)}
                 >
                   Approve → logistics
                 </button>
@@ -116,6 +164,118 @@ export default function SuperAdminApprovalsPage() {
             </li>
           ))}
         </ul>
+      )}
+
+      {approveTargetId && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          role="presentation"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setApproveTargetId(null);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal
+            aria-labelledby="approve-logistics-heading"
+            className="card flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="border-b border-[color:var(--border)] px-5 py-4">
+              <h2 id="approve-logistics-heading" className="text-lg font-semibold">
+                Approve for logistics?
+              </h2>
+              <p className="mt-1 text-sm text-[color:var(--text-muted)]">
+                We will create one packing QR label per unit in stock on each item
+                (matching current stock quantity). Logistics must scan each label
+                before the project goes live.
+              </p>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+              {approvePreviewQuery.isPending ? (
+                <p className="text-sm text-[color:var(--text-muted)]">
+                  Loading project items…
+                </p>
+              ) : approvePreviewQuery.isError ? (
+                <p className="text-sm text-[color:var(--danger)]">
+                  Could not load project items.
+                </p>
+              ) : (
+                <>
+                  <ul className="space-y-2 text-sm">
+                    {previewRows.map((row) => (
+                      <li
+                        key={row.sku}
+                        className="flex justify-between gap-4 rounded-xl bg-[color:var(--surface-muted)] px-3 py-2"
+                      >
+                        <span>
+                          <span className="font-medium">{row.name}</span>
+                          <span className="text-[color:var(--text-muted)]">
+                            {" "}
+                            · {row.sku}
+                          </span>
+                        </span>
+                        <span className="shrink-0 font-mono text-xs">
+                          {row.lines === 0
+                            ? "0 labels"
+                            : `${row.lines} label${row.lines === 1 ? "" : "s"}`}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  {previewRows.length === 0 ? (
+                    <p className="mt-4 text-sm text-[color:var(--text-muted)]">
+                      This project has no items yet.
+                    </p>
+                  ) : null}
+                  {totalPackingLines === 0 && previewRows.length > 0 ? (
+                    <p className="mt-4 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface-muted)] p-3 text-sm">
+                      Every item has stock quantity 0, so no packing labels will be
+                      created. Logistics can still activate once you approve—or edit
+                      quantities on the project first.
+                    </p>
+                  ) : null}
+                  {previewRows.length > 0 ? (
+                    <p className="mt-4 text-xs text-[color:var(--text-muted)]">
+                      Total:{" "}
+                      <strong className="text-[color:var(--text)]">
+                        {totalPackingLines}
+                      </strong>{" "}
+                      unique packing QR{totalPackingLines === 1 ? "" : "s"}.
+                    </p>
+                  ) : null}
+                </>
+              )}
+            </div>
+            <div className="flex flex-wrap justify-end gap-2 border-t border-[color:var(--border)] px-5 py-4">
+              <button
+                type="button"
+                ref={cancelRef}
+                className="btn btn-ghost"
+                disabled={act.isPending}
+                onClick={() => setApproveTargetId(null)}
+              >
+                No, cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={
+                  act.isPending ||
+                  approvePreviewQuery.isPending ||
+                  approvePreviewQuery.isError ||
+                  !approveTargetId
+                }
+                onClick={() =>
+                  approveTargetId &&
+                  act.mutate({ id: approveTargetId, action: "super_admin_approve" })
+                }
+              >
+                Yes, approve
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

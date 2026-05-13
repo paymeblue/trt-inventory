@@ -142,8 +142,9 @@ export async function POST(
         }
 
         const lines = gateOrder?.items ?? [];
+        const needsWarehouseScans = lines.length > 0;
         if (
-          lines.length === 0 ||
+          needsWarehouseScans &&
           lines.some(
             (item) =>
               item.logisticsScannedAt === null ||

@@ -2,6 +2,7 @@ import { db } from "@/db";
 import type { OrderItem } from "@/db/schema";
 import { orderItems } from "@/db/schema";
 import { generateBarcode } from "@/lib/barcode";
+import { packingLineCountForStock } from "@/lib/packing-lines";
 
 /** Same shape as `db` or a Drizzle transaction client — both expose `.insert`. */
 export type OrderItemInserter = { insert: typeof db.insert };
@@ -30,4 +31,21 @@ export async function insertOrderItemLine(
     }
   }
   throw new Error("Failed to generate a unique barcode");
+}
+
+/**
+ * Inserts one order line per packing unit (same SKU, unique barcodes).
+ * Returns how many lines were inserted (0 if stock quantity is 0).
+ */
+export async function insertOrderItemLinesForSku(
+  dbLike: OrderItemInserter,
+  orderId: string,
+  productSku: string,
+  stockQuantity: number,
+): Promise<number> {
+  const n = packingLineCountForStock(stockQuantity);
+  for (let i = 0; i < n; i++) {
+    await insertOrderItemLine(dbLike, orderId, productSku);
+  }
+  return n;
 }

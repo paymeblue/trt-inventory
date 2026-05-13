@@ -19,6 +19,7 @@ export function invalidateWorkspaceProjects(qc: {
     qc.invalidateQueries({ queryKey: queryKeys.projects }),
     qc.invalidateQueries({ queryKey: ["project-detail"] }),
     qc.invalidateQueries({ queryKey: queryKeys.approvalsSa }),
+    qc.invalidateQueries({ queryKey: queryKeys.approvalsLogistics }),
     qc.invalidateQueries({ queryKey: ["logistics-gate"] }),
   ]);
 }

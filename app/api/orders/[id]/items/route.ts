@@ -9,7 +9,7 @@ import { handleError, jsonError } from "@/lib/api";
 
 const addItemSchema = z.object({
   productId: z.string().trim().min(1, "productId required").max(80),
-  quantity: z.coerce.number().int().min(1).max(99).optional().default(1),
+  quantity: z.coerce.number().int().min(1).max(500).optional().default(1),
 });
 
 /**

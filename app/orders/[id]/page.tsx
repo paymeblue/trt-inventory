@@ -74,9 +74,7 @@ function orderHasPendingScansForPoll(data: DetailResponse | undefined) {
   if (!data) return false;
   return (
     data.order.status !== 'fulfilled' &&
-    data.items.some(
-      (i) => i.scannedAt === null || i.scannedAt === undefined,
-    )
+    data.items.some((i) => i.scannedAt === null || i.scannedAt === undefined)
   );
 }
 
@@ -257,8 +255,7 @@ export default function OrderDetailPage({
         />
       ) : user.role === 'installer' &&
         !isAssignedInstaller &&
-        (data.order.status === 'active' ||
-          data.order.status === 'anomaly') ? (
+        (data.order.status === 'active' || data.order.status === 'anomaly') ? (
         <div className="card border-[color:var(--warning)] bg-amber-50 p-6 text-sm dark:bg-amber-950/30">
           <p className="font-semibold text-[color:var(--text)]">
             Another installer is assigned to this project
@@ -410,11 +407,13 @@ function PmView({
     <div className="space-y-6">
       {canEdit && (
         <section className="card no-print p-6" data-tour="pm-add-item">
-          <h2 className="text-base font-semibold">Adjust items on this order</h2>
+          <h2 className="text-base font-semibold">
+            Adjust items on this order
+          </h2>
           <p className="mt-1 text-xs text-[color:var(--text-muted)]">
-            Add lines for the same SKU multiple times (e.g. 10 boxes) — each gets
-            its own barcode. Remove lines you are not shipping until the first
-            scan.
+            Add lines for the same SKU multiple times (e.g. 10 boxes) — each
+            gets its own barcode. Remove lines you are not shipping until the
+            first scan.
           </p>
           <form
             onSubmit={addItem}
@@ -723,7 +722,12 @@ function InstallerView({
           <section className="card" data-tour="pending">
             <header className="flex items-center justify-between border-b border-[color:var(--border)] px-6 py-4">
               <div>
-                <h2 className="text-base font-semibold">Pending</h2>
+                <h2 className="text-base font-semibold">
+                  Pending{' '}
+                  <span className="text-xs text-[color:var(--text-muted)]">
+                    (Would be removed after demo)
+                  </span>
+                </h2>
                 <p className="text-xs text-[color:var(--text-muted)]">
                   Awaiting verification
                 </p>
@@ -1037,13 +1041,7 @@ function TransportErrorCard({
   );
 }
 
-function ScanFeed({
-  entries,
-  busy,
-}: {
-  entries: FeedEntry[];
-  busy?: boolean;
-}) {
+function ScanFeed({ entries, busy }: { entries: FeedEntry[]; busy?: boolean }) {
   let body: ReactNode;
   if (entries.length === 0 && !busy) {
     body = (
@@ -1300,10 +1298,7 @@ function ItemCard({
         </div>
       </div>
 
-      <ItemScanArt
-        barcode={item.barcode}
-        scanToken={item.printedScanToken}
-      />
+      <ItemScanArt barcode={item.barcode} scanToken={item.printedScanToken} />
 
       <div className="flex items-center justify-between text-[11px] text-[color:var(--text-muted)]">
         <span className="font-mono">{item.barcode}</span>

@@ -5,7 +5,7 @@ import { db } from "@/db";
 import { orders, products, projects } from "@/db/schema";
 import { requireUser, requireUserAny } from "@/lib/auth-guard";
 import { handleError, jsonError } from "@/lib/api";
-import { insertOrderItemLine } from "@/lib/order-item-line";
+import { insertOrderItemLinesForSku } from "@/lib/order-item-line";
 import { isProjectEligibleForNewOrder } from "@/lib/project-new-order-eligibility";
 
 const createOrderSchema = z.object({
@@ -65,7 +65,8 @@ export async function GET() {
 
 /**
  * POST /api/orders → create an order for a project and **seed every current
- * project SKU** as an order line (unique barcode each). An order is a
+ * project SKU** as packing lines (`stock_quantity` rows per SKU, each with a
+ * unique barcode). An order is a
  * dispatched snapshot of the project; PMs can still remove lines or add
  * newly-created SKUs until the first scan (same rules as POST …/items).
  */
@@ -110,7 +111,7 @@ export async function POST(req: NextRequest) {
       });
 
       for (const p of prods) {
-        await insertOrderItemLine(tx, orderRow.id, p.sku);
+        await insertOrderItemLinesForSku(tx, orderRow.id, p.sku, p.stockQuantity);
       }
 
       return orderRow;

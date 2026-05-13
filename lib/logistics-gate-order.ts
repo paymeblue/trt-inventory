@@ -1,7 +1,10 @@
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { orders, products } from "@/db/schema";
-import { insertOrderItemLine, type OrderItemInserter } from "@/lib/order-item-line";
+import {
+  insertOrderItemLinesForSku,
+  type OrderItemInserter,
+} from "@/lib/order-item-line";
 
 /** Transaction (or db) with Drizzle `query` for product listing. */
 export type LogisticsGateDb = OrderItemInserter & {
@@ -27,8 +30,8 @@ export async function ensureLogisticsGateOrder(
 }
 
 /**
- * Seeds the per-project logistics gate order: one barcode per SKU (same snapshot
- * as PM “new order”). Installers reuse these stickers later for site scans.
+ * Seeds the per-project logistics gate order: `stock_quantity` barcode lines
+ * per SKU (same rules as PM “new order”). Installers reuse those stickers on site.
  */
 export async function seedLogisticsGateOrder(
   tx: LogisticsGateDb,
@@ -55,7 +58,7 @@ export async function seedLogisticsGateOrder(
   });
 
   for (const p of prods) {
-    await insertOrderItemLine(tx, orderRow.id, p.sku);
+    await insertOrderItemLinesForSku(tx, orderRow.id, p.sku, p.stockQuantity);
   }
 
   return orderRow;
