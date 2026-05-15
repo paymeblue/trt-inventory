@@ -1,4 +1,4 @@
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   boolean,
   integer,
@@ -105,10 +105,39 @@ export const projects = pgTable(
      * confirms (see POST …/approval).
      */
     pendingPatch: jsonb("pending_patch").$type<Record<string, unknown> | null>(),
+    /** `metadata_pending_super_admin` → SA review → `metadata_pending_logistics`. */
+    metadataChangeStage: text("metadata_change_stage"),
+    pendingDeleteRequested: boolean("pending_delete_requested")
+      .notNull()
+      .default(false),
     /** Logistics-level project sticker; minted when super-admin approves. */
     projectBarcode: text("project_barcode"),
   },
   (t) => [uniqueIndex("projects_name_unique").on(t.name)],
+);
+
+/**
+ * PM-defined reusable labels (e.g. "Upper unit") for fast batch creation
+ * of physical items inside a project.
+ */
+export const projectCategories = pgTable(
+  "project_categories",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [
+    uniqueIndex("project_categories_project_name_lower_unique").on(
+      t.projectId,
+      sql`lower(${t.name})`,
+    ),
+  ],
 );
 
 /**
@@ -126,6 +155,12 @@ export const products = pgTable(
     sku: text("sku").notNull(),
     name: text("name").notNull(),
     stockQuantity: integer("stock_quantity").notNull().default(1),
+    /** Optional group label when items are added via category picker. */
+    categoryId: uuid("category_id").references(() => projectCategories.id, {
+      onDelete: "set null",
+    }),
+    /** Rows created together in one PM action share a batch id (for display). */
+    batchId: uuid("batch_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -204,8 +239,74 @@ export const stockMovements = pgTable("stock_movements", {
     .notNull(),
 });
 
+/** Escalation thread with optional screenshot; messages polled from the UI. */
+export const disputes = pgTable("disputes", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  createdById: uuid("created_by_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id").references(() => projects.id, {
+    onDelete: "set null",
+  }),
+  orderId: uuid("order_id").references(() => orders.id, {
+    onDelete: "set null",
+  }),
+  title: text("title").notNull(),
+  description: text("description").notNull(),
+  photoPath: text("photo_path"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+export const disputeMessages = pgTable("dispute_messages", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  disputeId: uuid("dispute_id")
+    .notNull()
+    .references(() => disputes.id, { onDelete: "cascade" }),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  body: text("body").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+export const disputesRelations = relations(disputes, ({ one, many }) => ({
+  creator: one(users, {
+    fields: [disputes.createdById],
+    references: [users.id],
+  }),
+  project: one(projects, {
+    fields: [disputes.projectId],
+    references: [projects.id],
+  }),
+  order: one(orders, {
+    fields: [disputes.orderId],
+    references: [orders.id],
+  }),
+  messages: many(disputeMessages),
+}));
+
+export const disputeMessagesRelations = relations(disputeMessages, ({ one }) => ({
+  dispute: one(disputes, {
+    fields: [disputeMessages.disputeId],
+    references: [disputes.id],
+  }),
+  author: one(users, {
+    fields: [disputeMessages.userId],
+    references: [users.id],
+  }),
+}));
+
 export const projectsRelations = relations(projects, ({ many, one }) => ({
   items: many(products),
+  categories: many(projectCategories),
+  disputes: many(disputes),
   orders: many(orders),
   createdByUser: one(users, {
     fields: [projects.createdById],
@@ -217,15 +318,31 @@ export const projectsRelations = relations(projects, ({ many, one }) => ({
   }),
 }));
 
+export const projectCategoriesRelations = relations(
+  projectCategories,
+  ({ one, many }) => ({
+    project: one(projects, {
+      fields: [projectCategories.projectId],
+      references: [projects.id],
+    }),
+    products: many(products),
+  }),
+);
+
 export const productsRelations = relations(products, ({ one }) => ({
   project: one(projects, {
     fields: [products.projectId],
     references: [projects.id],
   }),
+  category: one(projectCategories, {
+    fields: [products.categoryId],
+    references: [projectCategories.id],
+  }),
 }));
 
 export const ordersRelations = relations(orders, ({ many, one }) => ({
   items: many(orderItems),
+  disputes: many(disputes),
   project: one(projects, {
     fields: [orders.projectId],
     references: [projects.id],
@@ -254,6 +371,8 @@ export const usersRelations = relations(users, ({ one, many }) => ({
   }),
   createdOrders: many(orders),
   createdProjects: many(projects),
+  disputesOpened: many(disputes),
+  disputeMessages: many(disputeMessages),
 }));
 
 export type User = typeof users.$inferSelect;
@@ -262,8 +381,11 @@ export type Project = typeof projects.$inferSelect;
 export type NewProject = typeof projects.$inferInsert;
 export type Product = typeof products.$inferSelect;
 export type NewProduct = typeof products.$inferInsert;
+export type ProjectCategory = typeof projectCategories.$inferSelect;
 export type Order = typeof orders.$inferSelect;
 export type NewOrder = typeof orders.$inferInsert;
 export type OrderItem = typeof orderItems.$inferSelect;
+export type Dispute = typeof disputes.$inferSelect;
+export type DisputeMessage = typeof disputeMessages.$inferSelect;
 export type NewOrderItem = typeof orderItems.$inferInsert;
 export type StockMovement = typeof stockMovements.$inferSelect;

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
 import useSWR from "@/lib/swr";
 import {
@@ -12,6 +13,11 @@ import {
 import { ConfirmModal } from "@/components/confirm-modal";
 import { StatusPill } from "@/components/status-pill";
 import { useAuthedUser } from "@/components/session-context";
+import {
+  METADATA_PENDING_LOGISTICS,
+  METADATA_PENDING_SUPER_ADMIN,
+} from "@/lib/metadata-stages";
+import { queryKeys } from "@/lib/query-keys";
 import type { OrderStatus, ProjectApprovalStatus, Role } from "@/db/schema";
 
 interface Item {
@@ -20,6 +26,15 @@ interface Item {
   sku: string;
   name: string;
   stockQuantity: number;
+  createdAt: string;
+  categoryId?: string | null;
+  batchId?: string | null;
+  categoryName?: string | null;
+}
+
+interface ProjectCategory {
+  id: string;
+  name: string;
   createdAt: string;
 }
 
@@ -40,11 +55,14 @@ interface Project {
   approvalStatus: ProjectApprovalStatus;
   pendingPatch: unknown;
   projectBarcode: string | null;
+  metadataChangeStage: string | null;
+  pendingDeleteRequested: boolean;
 }
 
 interface ProjectDetailResponse {
   project: Project;
   items: Item[];
+  categories: ProjectCategory[];
   orders: OrderLite[];
   /** When false, PM must not create another order on this project (API-enforced). */
   eligibleForNewOrder?: boolean;
@@ -126,6 +144,15 @@ function ProjectApprovalBanners({
       viewerRole === "super_admin" ||
       viewerRole === "logistics")
   ) {
+    const stageHint =
+      project.metadataChangeStage === METADATA_PENDING_SUPER_ADMIN
+        ? "Waiting on super-admin to forward these changes to logistics."
+        : project.metadataChangeStage === METADATA_PENDING_LOGISTICS
+          ? "Waiting on logistics to confirm before changes go live."
+          : legacyNoStage(project)
+            ? "These edits will apply when logistics confirms (legacy pending patch)."
+            : null;
+
     blocks.push(
       <div
         key="patch"
@@ -133,18 +160,58 @@ function ProjectApprovalBanners({
       >
         <div className="text-sm font-semibold">Updates queued</div>
         <p className="mt-1 text-xs text-[color:var(--text-muted)]">
-          Edits to name, description, or installer assignment are held until
-          logistics applies them:{" "}
+          Edits to name, description, or installer assignment stay staged until the
+          approval chain clears:{" "}
           <span className="font-medium text-[color:var(--text)]">
             {patchKeys.join(", ")}
           </span>
+          {stageHint ? (
+            <>
+              {" "}
+              <span className="block pt-2 text-[color:var(--text)]">
+                {stageHint}
+              </span>
+            </>
+          ) : null}
         </p>
+      </div>,
+    );
+  }
+
+  if (
+    project.pendingDeleteRequested &&
+    (viewerRole === "pm" ||
+      viewerRole === "super_admin" ||
+      viewerRole === "logistics")
+  ) {
+    const delHint =
+      project.metadataChangeStage === METADATA_PENDING_SUPER_ADMIN
+        ? "Super-admin must forward to logistics."
+        : project.metadataChangeStage === METADATA_PENDING_LOGISTICS
+          ? "Logistics will remove the project after confirming there are no blocking orders."
+          : "Removal is queued.";
+    blocks.push(
+      <div
+        key="delete"
+        className="card border-[color:var(--danger)]/50 bg-[color:var(--surface-muted)] p-4"
+      >
+        <div className="text-sm font-semibold text-[color:var(--danger)]">
+          Project deletion requested
+        </div>
+        <p className="mt-1 text-xs text-[color:var(--text-muted)]">{delHint}</p>
       </div>,
     );
   }
 
   if (blocks.length === 0) return null;
   return <div className="space-y-3">{blocks}</div>;
+}
+
+function legacyNoStage(project: Project) {
+  return (
+    project.metadataChangeStage == null &&
+    project.approvalStatus === "active"
+  );
 }
 
 export default function ProjectDetailPage() {
@@ -175,8 +242,11 @@ export default function ProjectDetailPage() {
     );
   }
 
-  const { project, items, orders } = data;
+  const { project, items, orders, categories } = data;
   const eligibleForNewOrder = data.eligibleForNewOrder !== false;
+  const deleteQueuesApproval =
+    project.approvalStatus === "active" ||
+    project.approvalStatus === "pending_logistics";
 
   async function confirmDeleteProject() {
     setDeleteProjectBusy(true);
@@ -185,12 +255,20 @@ export default function ProjectDetailPage() {
       const res = await fetch(`/api/projects/${project.id}`, {
         method: "DELETE",
       });
+      const json = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        queuedForApproval?: boolean;
+      };
       if (res.ok) {
+        if (json.queuedForApproval) {
+          setDeleteProjectOpen(false);
+          await mutate();
+          return;
+        }
         setDeleteProjectOpen(false);
         router.push("/projects");
         return;
       }
-      const json = (await res.json().catch(() => ({}))) as { error?: string };
       setDeleteProjectError(
         typeof json.error === "string"
           ? json.error
@@ -257,9 +335,10 @@ export default function ProjectDetailPage() {
         />
       )}
 
-      <ItemsSection
+      <ProjectInventorySection
         projectId={project.id}
         items={items}
+        categories={categories ?? []}
         canEdit={canManage}
         onChanged={mutate}
       />
@@ -274,14 +353,25 @@ export default function ProjectDetailPage() {
         }}
         title="Delete this project?"
         description={
-          <>
-            <span className="font-medium text-[color:var(--text)]">
-              {project.name}
-            </span>{" "}
-            will be removed permanently. All items in this project are deleted
-            with it. If any orders still reference this project, delete or
-            reassign them first.
-          </>
+          deleteQueuesApproval ? (
+            <>
+              <span className="font-medium text-[color:var(--text)]">
+                {project.name}
+              </span>{" "}
+              is active or mid-rollout. We will queue this deletion for
+              super-admin (and logistics) confirmation instead of removing it
+              instantly. Make sure no blocking orders remain first.
+            </>
+          ) : (
+            <>
+              <span className="font-medium text-[color:var(--text)]">
+                {project.name}
+              </span>{" "}
+              will be removed permanently. All items in this project are deleted
+              with it. If any orders still reference this project, delete or
+              reassign them first.
+            </>
+          )
         }
         confirmLabel="Delete project"
         cancelLabel="Cancel"
@@ -303,12 +393,14 @@ function InstallerAssignmentPanel({
   installerUserId: string | null;
   onChanged: () => Promise<unknown>;
 }) {
+  const qc = useQueryClient();
   const { data } = useSWR<{ users: { id: string; name: string; email: string; role: string }[] }>(
     "/api/users",
   );
   const [value, setValue] = useState(installerUserId ?? "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [queued, setQueued] = useState(false);
 
   useEffect(() => {
     setValue(installerUserId ?? "");
@@ -321,6 +413,7 @@ function InstallerAssignmentPanel({
     e.preventDefault();
     setBusy(true);
     setErr(null);
+    setQueued(false);
     try {
       const res = await fetch(`/api/projects/${projectId}`, {
         method: "PATCH",
@@ -331,9 +424,12 @@ function InstallerAssignmentPanel({
       });
       const json = (await res.json().catch(() => ({}))) as {
         error?: string;
+        queuedForApproval?: boolean;
       };
       if (!res.ok) throw new Error(json.error ?? "Update failed");
+      if (json.queuedForApproval) setQueued(true);
       await onChanged();
+      await qc.invalidateQueries({ queryKey: queryKeys.approvalsQueueCounts });
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -373,6 +469,11 @@ function InstallerAssignmentPanel({
           {busy ? "Saving…" : "Save"}
         </button>
       </form>
+      {queued && (
+        <p className="mt-2 text-xs text-[color:var(--info)]">
+          Change queued for super-admin / logistics approval before it goes live.
+        </p>
+      )}
       {err && (
         <p className="mt-2 text-xs text-[color:var(--danger)]">{err}</p>
       )}
@@ -380,121 +481,378 @@ function InstallerAssignmentPanel({
   );
 }
 
-function ItemsSection({
+function CategoriesManageSection({
   projectId,
-  items,
+  categories,
   canEdit,
   onChanged,
 }: {
   projectId: string;
-  items: Item[];
+  categories: ProjectCategory[];
   canEdit: boolean;
   onChanged: () => Promise<unknown>;
 }) {
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [delBusy, setDelBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function addCategory(e: React.FormEvent) {
+    e.preventDefault();
+    const n = name.trim();
+    if (!n) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/categories`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: n }),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        category?: ProjectCategory;
+        error?: string;
+      };
+      if (!res.ok) throw new Error(json.error ?? "Could not save category");
+      setName("");
+      await onChanged();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeCategory(id: string, label: string) {
+    if (
+      !confirm(`Remove category "${label}"? Items must not still use it.`)
+    ) {
+      return;
+    }
+    setDelBusy(id);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/projects/${projectId}/categories/${id}`,
+        { method: "DELETE" },
+      );
+      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(json.error ?? "Could not remove category");
+      await onChanged();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setDelBusy(null);
+    }
+  }
+
   return (
-    <section className="card overflow-hidden">
-      <header className="flex items-center justify-between border-b border-[color:var(--border)] px-6 py-4">
-        <div>
-          <h2 className="text-base font-semibold">Items</h2>
-          <p className="text-xs text-[color:var(--text-muted)]">
-            Unique to this project. Starting stock is at least 1; PM adjustments
-            cannot go below 1. Verifications cannot reduce on-hand stock below 0.
-          </p>
-        </div>
-      </header>
+    <div className="space-y-6 p-6">
+      {canEdit ? (
+        <form onSubmit={addCategory} className="flex flex-wrap gap-3 md:items-end">
+          <label className="block min-w-[240px] flex-1">
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
+              New category name
+            </span>
+            <input
+              className="input w-full"
+              placeholder='e.g. Upper unit, Lower unit'
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </label>
+          <button type="submit" disabled={busy || !name.trim()} className="btn btn-primary">
+            {busy ? "Saving…" : "Save category"}
+          </button>
+        </form>
+      ) : null}
 
-      {canEdit && (
-        <AddItemForm
-          projectId={projectId}
-          onCreated={onChanged}
-          existingSkus={items.map((i) => i.sku)}
-        />
-      )}
-
-      {items.length === 0 ? (
-        <div className="px-6 py-10 text-center text-sm text-[color:var(--text-muted)]">
-          No items yet.{" "}
-          {canEdit && "Use the form above to add the project's first SKU."}
+      {error ? (
+        <div className="rounded-lg border border-[color:var(--danger)] px-3 py-2 text-xs text-[color:var(--danger)]">
+          {error}
         </div>
+      ) : null}
+
+      {categories.length === 0 ? (
+        <p className="text-sm text-[color:var(--text-muted)]">
+          No categories yet.
+          {canEdit ? " Add labels here so the Items tab stays simple." : null}
+        </p>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto rounded-xl border border-[color:var(--border)]">
           <table className="w-full text-sm">
             <thead className="bg-[color:var(--surface-muted)] text-xs uppercase tracking-wide text-[color:var(--text-muted)]">
               <tr>
-                <th className="px-6 py-3 text-left">SKU</th>
-                <th className="px-6 py-3 text-left">Name</th>
-                <th className="px-6 py-3 text-right">Stock</th>
-                {canEdit && (
-                  <th className="px-6 py-3 text-right">
+                <th className="px-4 py-3 text-left">Name</th>
+                <th className="hidden px-4 py-3 text-left sm:table-cell">
+                  Created
+                </th>
+                {canEdit ? (
+                  <th className="px-4 py-3 text-right">
                     <span className="sr-only">Actions</span>
                   </th>
-                )}
+                ) : null}
               </tr>
             </thead>
             <tbody className="divide-y divide-[color:var(--border)]">
-              {items.map((i) => (
-                <ItemRow
-                  key={i.id}
-                  item={i}
-                  projectId={projectId}
-                  canEdit={canEdit}
-                  onChanged={onChanged}
-                />
+              {categories.map((c) => (
+                <tr key={c.id}>
+                  <td className="px-4 py-3 font-medium">{c.name}</td>
+                  <td className="hidden px-4 py-3 text-[color:var(--text-muted)] sm:table-cell">
+                    {new Date(c.createdAt).toLocaleString()}
+                  </td>
+                  {canEdit ? (
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        type="button"
+                        disabled={delBusy !== null}
+                        onClick={() => void removeCategory(c.id, c.name)}
+                        className="btn btn-ghost btn-sm text-[color:var(--danger)]"
+                      >
+                        {delBusy === c.id ? "Removing…" : "Remove"}
+                      </button>
+                    </td>
+                  ) : null}
+                </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+function ProjectInventorySection({
+  projectId,
+  items,
+  categories,
+  canEdit,
+  onChanged,
+}: {
+  projectId: string;
+  items: Item[];
+  categories: ProjectCategory[];
+  canEdit: boolean;
+  onChanged: () => Promise<unknown>;
+}) {
+  const [tab, setTab] = useState<"items" | "categories">("items");
+
+  const tabBtn = (id: "items" | "categories", label: string) => (
+    <button
+      key={id}
+      type="button"
+      onClick={() => setTab(id)}
+      className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
+        tab === id
+          ? "bg-[color:var(--primary)] text-[color:var(--primary-foreground)]"
+          : "bg-[color:var(--surface-muted)] text-[color:var(--text)] hover:bg-[color:var(--surface)]"
+      }`}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <section className="card overflow-hidden">
+      <header className="space-y-4 border-b border-[color:var(--border)] px-6 py-4">
+        <div className="flex flex-wrap gap-2">
+          {tabBtn("items", "Items")}
+          {tabBtn("categories", "Categories")}
+        </div>
+        <div>
+          <h2 className="text-base font-semibold">
+            {tab === "items" ? "Items" : "Categories"}
+          </h2>
+          <p className="mt-1 text-xs text-[color:var(--text-muted)]">
+            {tab === "items"
+              ? "Each physical unit is its own row (unique SKU). Pick a category on the left tab, or use a custom name for one-off parts."
+              : "Create reusable labels here. The Items tab only picks from this list so adding stock stays fast in the field."}
+          </p>
+        </div>
+      </header>
+
+      {tab === "categories" ? (
+        <CategoriesManageSection
+          projectId={projectId}
+          categories={categories}
+          canEdit={canEdit}
+          onChanged={onChanged}
+        />
+      ) : (
+        <>
+          {canEdit && (
+            <AddItemForm
+              projectId={projectId}
+              categories={categories}
+              onCreated={onChanged}
+              existingSkus={items.map((i) => i.sku)}
+              onGoToCategories={() => setTab("categories")}
+            />
+          )}
+
+          {items.length === 0 ? (
+            <div className="px-6 py-10 text-center text-sm text-[color:var(--text-muted)]">
+              No items yet.{" "}
+              {canEdit && "Use the form above to add your first units."}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-[color:var(--surface-muted)] text-xs uppercase tracking-wide text-[color:var(--text-muted)]">
+                  <tr>
+                    <th className="px-6 py-3 text-left">Category</th>
+                    <th className="px-6 py-3 text-left">Batch</th>
+                    <th className="px-6 py-3 text-left">SKU</th>
+                    <th className="px-6 py-3 text-left">Name</th>
+                    <th className="px-6 py-3 text-right">Stock</th>
+                    {canEdit && (
+                      <th className="px-6 py-3 text-right">
+                        <span className="sr-only">Actions</span>
+                      </th>
+                    )}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[color:var(--border)]">
+                  {items.map((i) => (
+                    <ItemRow
+                      key={i.id}
+                      item={i}
+                      projectId={projectId}
+                      canEdit={canEdit}
+                      onChanged={onChanged}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
     </section>
   );
 }
 
+function shortBatchId(batchId: string | null | undefined): string {
+  if (!batchId) return "—";
+  return batchId.replace(/-/g, "").slice(0, 8);
+}
+
 function AddItemForm({
   projectId,
+  categories: initialCategories,
   onCreated,
   existingSkus,
+  onGoToCategories,
 }: {
   projectId: string;
+  categories: ProjectCategory[];
   onCreated: () => Promise<unknown>;
   existingSkus: string[];
+  onGoToCategories?: () => void;
 }) {
+  const [categories, setCategories] = useState(initialCategories);
+  const [mode, setMode] = useState<"category" | "custom">("category");
+  const [categoryId, setCategoryId] = useState("");
   const [sku, setSku] = useState("");
   const [name, setName] = useState("");
-  const [stock, setStock] = useState("1");
+  const [qty, setQty] = useState("1");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [skuDirty, setSkuDirty] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [previewLines, setPreviewLines] = useState<string[]>([]);
+  const [pendingPayload, setPendingPayload] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
 
   useEffect(() => {
-    if (skuDirty || !name.trim()) return;
+    setCategories(initialCategories);
+  }, [initialCategories]);
+
+  useEffect(() => {
+    if (skuDirty || !name.trim() || mode !== "custom") return;
     const base = skuBaseFromLabel(name);
     const idx = nextSkuIndexForBase(base, existingSkus);
     setSku(formatSkuSequence(base, idx));
-  }, [name, existingSkus, skuDirty]);
+  }, [name, existingSkus, skuDirty, mode]);
 
-  async function onSubmit(e: React.FormEvent) {
+  function buildPayload(): Record<string, unknown> {
+    const quantity = Math.min(
+      500,
+      Math.max(1, Number.parseInt(qty || "1", 10) || 1),
+    );
+    if (mode === "category") {
+      if (!categoryId) throw new Error("Choose a category");
+      return { categoryId, quantity };
+    }
+    return {
+      name: name.trim(),
+      quantity,
+    };
+  }
+
+  function buildPreviewLines(quantity: number): string[] {
+    if (mode === "category") {
+      const cat = categories.find((c) => c.id === categoryId);
+      const label = cat?.name ?? "Category";
+      return Array.from(
+        { length: quantity },
+        (_, i) => `${label} (${i + 1} of ${quantity})`,
+      );
+    }
+    const n = name.trim();
+    if (quantity <= 1) return [n];
+    return Array.from(
+      { length: quantity },
+      (_, i) => `${n} · ${i + 1} of ${quantity}`,
+    );
+  }
+
+  function prepareSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setError(null);
+    try {
+      const payload = buildPayload();
+      const quantity = payload.quantity as number;
+      if (mode === "custom" && !name.trim()) {
+        setError("Enter a name");
+        return;
+      }
+      if (mode === "category" && !categoryId) {
+        setError("Choose a category from the list");
+        return;
+      }
+      if (quantity > 1) {
+        setPreviewLines(buildPreviewLines(quantity));
+        setPendingPayload(payload);
+        setConfirmOpen(true);
+        return;
+      }
+      void executePost(payload);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function executePost(payload: Record<string, unknown>) {
     setBusy(true);
     setError(null);
     try {
       const res = await fetch(`/api/projects/${projectId}/items`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          sku: sku.trim(),
-          name: name.trim(),
-          stockQuantity: Math.max(
-            1,
-            Number.parseInt(stock || "1", 10) || 1,
-          ),
-        }),
+        body: JSON.stringify(payload),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Failed to add item");
+      if (!res.ok) throw new Error(json.error ?? "Failed to add items");
       setSku("");
       setName("");
-      setStock("1");
+      setQty("1");
       setSkuDirty(false);
+      setConfirmOpen(false);
+      setPendingPayload(null);
       await onCreated();
     } catch (err) {
       setError((err as Error).message);
@@ -504,47 +862,178 @@ function AddItemForm({
   }
 
   return (
-    <form
-      onSubmit={onSubmit}
-      className="grid gap-3 border-b border-[color:var(--border)] p-6 md:grid-cols-[1fr_2fr_7rem_auto]"
-    >
-      <input
-        required
-        className="input font-mono"
-        placeholder="SKU (auto from name)"
-        value={sku}
-        onChange={(e) => {
-          setSkuDirty(true);
-          setSku(e.target.value);
-        }}
-      />
-      <input
-        required
-        className="input"
-        placeholder="Name — SKU suggests from label"
-        value={name}
-        onChange={(e) => {
-          setSkuDirty(false);
-          setName(e.target.value);
-        }}
-      />
-      <input
-        type="number"
-        min={1}
-        className="input text-right"
-        placeholder="Stock"
-        value={stock}
-        onChange={(e) => setStock(e.target.value)}
-      />
-      <button type="submit" disabled={busy} className="btn btn-primary">
-        {busy ? "Adding…" : "Add item"}
-      </button>
-      {error && (
-        <div className="rounded-lg border border-[color:var(--danger)] bg-red-50 px-3 py-2 text-xs text-[color:var(--danger)] md:col-span-4">
-          {error}
+    <>
+      <form
+        onSubmit={prepareSubmit}
+        className="space-y-4 border-b border-[color:var(--border)] p-6"
+      >
+        <div className="flex flex-wrap gap-4 text-sm">
+          <label className="flex cursor-pointer items-center gap-2">
+            <input
+              type="radio"
+              name="add-mode"
+              checked={mode === "category"}
+              onChange={() => setMode("category")}
+            />
+            Category
+          </label>
+          <label className="flex cursor-pointer items-center gap-2">
+            <input
+              type="radio"
+              name="add-mode"
+              checked={mode === "custom"}
+              onChange={() => setMode("custom")}
+            />
+            Custom name
+          </label>
         </div>
-      )}
-    </form>
+
+        {mode === "category" ? (
+          <div className="space-y-3">
+            <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-[color:var(--text-muted)]">
+                  Category (name &amp; SKU follow this label)
+                </label>
+                <select
+                  className="input w-full"
+                  value={categoryId}
+                  onChange={(e) => setCategoryId(e.target.value)}
+                >
+                  <option value="">Select…</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-[color:var(--text-muted)]">
+                  How many units?
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={500}
+                  className="input w-full text-right md:w-28"
+                  value={qty}
+                  onChange={(e) => setQty(e.target.value)}
+                />
+              </div>
+            </div>
+            {categories.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-[color:var(--border)] bg-[color:var(--surface-muted)]/50 p-4 text-xs text-[color:var(--text-muted)]">
+                Create at least one category first.{" "}
+                {onGoToCategories ? (
+                  <button
+                    type="button"
+                    className="mt-2 inline font-semibold text-[color:var(--primary)] hover:underline"
+                    onClick={onGoToCategories}
+                  >
+                    Open Categories tab
+                  </button>
+                ) : null}
+              </div>
+            ) : (
+              <p className="text-xs text-[color:var(--text-muted)]">
+                Labels are edited only under Categories. Need another template?{" "}
+                {onGoToCategories ? (
+                  <button
+                    type="button"
+                    className="font-semibold text-[color:var(--primary)] hover:underline"
+                    onClick={onGoToCategories}
+                  >
+                    Switch to Categories
+                  </button>
+                ) : (
+                  <>Use the Categories tab.</>
+                )}
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-[1fr_2fr_7rem_auto]">
+            <input
+              className="input font-mono"
+              placeholder="SKU (auto from name)"
+              value={sku}
+              onChange={(e) => {
+                setSkuDirty(true);
+                setSku(e.target.value);
+              }}
+            />
+            <input
+              required={mode === "custom"}
+              className="input"
+              placeholder="Name — SKU suggests from label"
+              value={name}
+              onChange={(e) => {
+                setSkuDirty(false);
+                setName(e.target.value);
+              }}
+            />
+            <input
+              type="number"
+              min={1}
+              max={500}
+              className="input text-right"
+              placeholder="Units"
+              value={qty}
+              onChange={(e) => setQty(e.target.value)}
+            />
+            <span className="hidden md:block" />
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="submit" disabled={busy} className="btn btn-primary">
+            {busy ? "Adding…" : "Add items"}
+          </button>
+          <span className="text-xs text-[color:var(--text-muted)]">
+            {mode === "category"
+              ? "One database row per unit — each gets its own QR when orders ship."
+              : "Several units: each row is separate; SKUs are generated for you."}
+          </span>
+        </div>
+        {error && (
+          <div className="rounded-lg border border-[color:var(--danger)] bg-red-50 px-3 py-2 text-xs text-[color:var(--danger)] dark:bg-red-950/30">
+            {error}
+          </div>
+        )}
+      </form>
+
+      <ConfirmModal
+        open={confirmOpen}
+        onOpenChange={(open) => {
+          setConfirmOpen(open);
+          if (!open) setPendingPayload(null);
+        }}
+        title="Create these items?"
+        variant="default"
+        description={
+          <div className="space-y-3 text-sm text-[color:var(--text)]">
+            <p>
+              This action creates{" "}
+              <strong>{previewLines.length}</strong> separate items for this
+              project. Each has its own ID and stock so they can be scanned
+              independently.
+            </p>
+            <ul className="max-h-48 list-inside list-disc overflow-y-auto rounded-lg border border-[color:var(--border)] bg-[color:var(--surface-muted)]/80 px-3 py-2 text-xs">
+              {previewLines.map((line, idx) => (
+                <li key={idx}>{line}</li>
+              ))}
+            </ul>
+          </div>
+        }
+        confirmLabel="Yes, create items"
+        cancelLabel="Cancel"
+        busy={busy}
+        onConfirm={() =>
+          pendingPayload ? executePost(pendingPayload) : undefined
+        }
+      />
+    </>
   );
 }
 
@@ -626,6 +1115,15 @@ function ItemRow({
   return (
     <>
       <tr>
+        <td className="px-6 py-3 text-[color:var(--text-muted)]">
+          {item.categoryName ?? "—"}
+        </td>
+        <td
+          className="px-6 py-3 font-mono text-xs text-[color:var(--text-muted)]"
+          title={item.batchId ?? undefined}
+        >
+          {shortBatchId(item.batchId)}
+        </td>
         <td className="px-6 py-3 font-mono">
           {editing ? (
             <input
@@ -733,7 +1231,7 @@ function ItemRow({
       {error && (
         <tr>
           <td
-            colSpan={canEdit ? 4 : 3}
+            colSpan={canEdit ? 6 : 5}
             className="bg-red-50 px-6 py-2 text-xs text-[color:var(--danger)]"
           >
             {error}

@@ -14,6 +14,16 @@ interface QueueRow {
   createdAt: string;
 }
 
+interface LogisticsMetaRow {
+  id: string;
+  name: string;
+  approvalStatus: string;
+  projectBarcode: string | null;
+  pendingDeleteRequested: boolean;
+  pendingPatch: unknown;
+  createdAt: string;
+}
+
 export default function LogisticsApprovalsPage() {
   const user = useAuthedUser();
   const qc = useQueryClient();
@@ -27,12 +37,41 @@ export default function LogisticsApprovalsPage() {
     enabled: user?.role === "logistics",
   });
 
+  const metaQuery = useQuery({
+    queryKey: queryKeys.approvalsLogisticsMetadata,
+    queryFn: () =>
+      fetchJson<{ projects: LogisticsMetaRow[] }>(
+        "/api/approvals/projects?queue=logistics_metadata",
+      ),
+    enabled: user?.role === "logistics",
+  });
+
   const rejectMut = useMutation({
     mutationFn: (projectId: string) =>
       fetchJson(`/api/projects/${projectId}/approval`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: "logistics_reject" }),
+      }),
+    onSuccess: () => invalidateAllApprovalSurface(qc),
+  });
+
+  const applyMetaMut = useMutation({
+    mutationFn: (projectId: string) =>
+      fetchJson(`/api/projects/${projectId}/approval`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "logistics_apply_patch" }),
+      }),
+    onSuccess: () => invalidateAllApprovalSurface(qc),
+  });
+
+  const rejectMetaMut = useMutation({
+    mutationFn: (projectId: string) =>
+      fetchJson(`/api/projects/${projectId}/approval`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "logistics_reject_metadata_change" }),
       }),
     onSuccess: () => invalidateAllApprovalSurface(qc),
   });
@@ -50,6 +89,12 @@ export default function LogisticsApprovalsPage() {
   }
 
   const rows = data?.projects ?? [];
+  const metaRows = metaQuery.data?.projects ?? [];
+
+  function patchKeys(raw: unknown): string {
+    if (!raw || typeof raw !== "object") return "";
+    return Object.keys(raw as object).join(", ");
+  }
 
   return (
     <div className="space-y-6">
@@ -117,6 +162,85 @@ export default function LogisticsApprovalsPage() {
           ))}
         </ul>
       )}
+
+      <section className="border-t border-[color:var(--border)] pt-8">
+        <h2 className="text-xl font-semibold">Apply PM / admin updates</h2>
+        <p className="mt-1 text-sm text-[color:var(--text-muted)]">
+          Super-admin forwarded these changes. Confirm to put new field values
+          live, or fulfil a delete once any orders are cleared.
+        </p>
+        {metaQuery.error ? (
+          <p className="mt-3 text-sm text-[color:var(--danger)]">
+            {(metaQuery.error as Error).message}
+          </p>
+        ) : null}
+        {metaQuery.isPending ? (
+          <p className="mt-4 text-sm text-[color:var(--text-muted)]">Loading…</p>
+        ) : metaRows.length === 0 ? (
+          <p className="mt-4 text-sm text-[color:var(--text-muted)]">
+            No pending updates.
+          </p>
+        ) : (
+          <ul className="mt-4 space-y-3">
+            {metaRows.map((p) => (
+              <li key={p.id} className="card p-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <Link
+                      href={`/projects/${p.id}`}
+                      className="font-semibold hover:underline"
+                    >
+                      {p.name}
+                    </Link>
+                    <div className="text-xs text-[color:var(--text-muted)]">
+                      {new Date(p.createdAt).toLocaleString()}
+                    </div>
+                    <div className="mt-2 text-xs text-[color:var(--text)]">
+                      {p.pendingDeleteRequested ? (
+                        <span className="font-semibold text-[color:var(--danger)]">
+                          Delete project after checks
+                        </span>
+                      ) : null}
+                      {p.pendingDeleteRequested && patchKeys(p.pendingPatch)
+                        ? " · "
+                        : null}
+                      {patchKeys(p.pendingPatch) ? (
+                        <span>Updates: {patchKeys(p.pendingPatch)}</span>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      disabled={
+                        applyMetaMut.isPending ||
+                        rejectMetaMut.isPending ||
+                        rejectMut.isPending
+                      }
+                      onClick={() => applyMetaMut.mutate(p.id)}
+                    >
+                      Confirm apply
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-danger btn-sm"
+                      disabled={
+                        applyMetaMut.isPending ||
+                        rejectMetaMut.isPending ||
+                        rejectMut.isPending
+                      }
+                      onClick={() => rejectMetaMut.mutate(p.id)}
+                    >
+                      Reject changes
+                    </button>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </div>
   );
 }

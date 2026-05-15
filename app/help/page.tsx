@@ -67,15 +67,10 @@ export default function HelpPage() {
             one project; items cannot be shared across projects.
           </Def>
           <Def term="Item / SKU">
-            A product identifier scoped to a project. Manage them from the
-            project&apos;s detail page under{" "}
-            <Link
-              href="/projects"
-              className="text-[color:var(--primary)] underline"
-            >
-              Projects
-            </Link>
-            .
+            A product line scoped to a project. Prefer adding <strong>one row per
+            physical unit</strong> so each gets its own scan code on shipment —
+            use <strong>Categories</strong> (e.g. Upper unit) to add many units at
+            once from the project detail page.
           </Def>
           <Def term="Order">
             A collection of items from one project, shipped out as a

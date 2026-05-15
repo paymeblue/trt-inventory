@@ -2,10 +2,14 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { and, asc, eq, ne } from "drizzle-orm";
 import { db } from "@/db";
-import { orders, products, projects, users } from "@/db/schema";
+import { orders, products, projectCategories, projects, users } from "@/db/schema";
 import { requireUser, requireUserAny } from "@/lib/auth-guard";
 import { handleError, jsonError } from "@/lib/api";
 import { isProjectEligibleForNewOrder } from "@/lib/project-new-order-eligibility";
+import {
+  METADATA_PENDING_LOGISTICS,
+  METADATA_PENDING_SUPER_ADMIN,
+} from "@/lib/metadata-stages";
 
 const updateSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
@@ -65,12 +69,35 @@ export async function GET(
       );
     }
 
-    const [items, projectOrders] = await Promise.all([
+    const [itemRows, categoryRows, projectOrders] = await Promise.all([
       db
-        .select()
+        .select({
+          id: products.id,
+          projectId: products.projectId,
+          sku: products.sku,
+          name: products.name,
+          stockQuantity: products.stockQuantity,
+          createdAt: products.createdAt,
+          categoryId: products.categoryId,
+          batchId: products.batchId,
+          categoryName: projectCategories.name,
+        })
         .from(products)
+        .leftJoin(
+          projectCategories,
+          eq(products.categoryId, projectCategories.id),
+        )
         .where(eq(products.projectId, id))
         .orderBy(asc(products.sku)),
+      db
+        .select({
+          id: projectCategories.id,
+          name: projectCategories.name,
+          createdAt: projectCategories.createdAt,
+        })
+        .from(projectCategories)
+        .where(eq(projectCategories.projectId, id))
+        .orderBy(asc(projectCategories.name)),
       db
         .select()
         .from(orders)
@@ -82,7 +109,8 @@ export async function GET(
 
     return NextResponse.json({
       project,
-      items,
+      items: itemRows,
+      categories: categoryRows,
       orders: projectOrders,
       eligibleForNewOrder,
     });
@@ -92,8 +120,9 @@ export async function GET(
 }
 
 /**
- * PATCH /api/projects/[id] → rename / edit description. PM-only.
- * Name uniqueness is enforced across all non-archived projects.
+ * PATCH /api/projects/[id] → rename / description / installer.
+ * Active and pending-logistics projects queue metadata for SA → logistics.
+ * Other statuses apply immediately. Name uniqueness enforced globally.
  */
 export async function PATCH(
   req: NextRequest,
@@ -138,11 +167,12 @@ export async function PATCH(
       return jsonError(400, "No fields to update");
     }
 
-    if (
-      (existing.approvalStatus === "active" ||
-        existing.approvalStatus === "pending_logistics") &&
-      hasIncoming
-    ) {
+    const livesOnSite =
+      existing.approvalStatus === "active" ||
+      existing.approvalStatus === "pending_logistics";
+
+    /** Live projects: metadata changes queue for SA → logistics (every role, incl. super_admin). */
+    if (livesOnSite && hasIncoming) {
       const merged = mergePending(existing.pendingPatch, {
         ...(body.name !== undefined ? { name: body.name } : {}),
         ...(body.description !== undefined
@@ -156,11 +186,15 @@ export async function PATCH(
         .update(projects)
         .set({
           pendingPatch: merged,
+          metadataChangeStage: METADATA_PENDING_SUPER_ADMIN,
           updatedAt: new Date(),
         })
         .where(eq(projects.id, id))
         .returning();
-      return NextResponse.json({ project: updated });
+      return NextResponse.json({
+        project: updated,
+        queuedForApproval: true as const,
+      });
     }
 
     const [updated] = await db
@@ -213,6 +247,44 @@ export async function DELETE(
         409,
         "This project still has orders. Delete or move them first, then delete the project.",
       );
+    }
+
+    const isPm = auth.actor.role === "pm";
+    const livesOnSite =
+      existing.approvalStatus === "active" ||
+      existing.approvalStatus === "pending_logistics";
+
+    if (livesOnSite) {
+      if (isPm) {
+        const [updated] = await db
+          .update(projects)
+          .set({
+            pendingDeleteRequested: true,
+            metadataChangeStage: METADATA_PENDING_SUPER_ADMIN,
+            updatedAt: new Date(),
+          })
+          .where(eq(projects.id, id))
+          .returning();
+        return NextResponse.json({
+          ok: true,
+          queuedForApproval: true as const,
+          project: updated,
+        });
+      }
+      const [updated] = await db
+        .update(projects)
+        .set({
+          pendingDeleteRequested: true,
+          metadataChangeStage: METADATA_PENDING_LOGISTICS,
+          updatedAt: new Date(),
+        })
+        .where(eq(projects.id, id))
+        .returning();
+      return NextResponse.json({
+        ok: true,
+        queuedForApproval: true as const,
+        project: updated,
+      });
     }
 
     await db.delete(projects).where(eq(projects.id, id));

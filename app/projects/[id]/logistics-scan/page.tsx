@@ -210,7 +210,7 @@ export default function ProjectLogisticsScanPage({
           </div>
           {!hasLines && (
             <p className="text-sm text-[color:var(--text-muted)]">
-              No SKUs on this project — you can activate without scanning lines.
+              No SKUs on this project — you can approve without scanning lines.
             </p>
           )}
         </div>
@@ -301,11 +301,11 @@ export default function ProjectLogisticsScanPage({
       )}
 
       <section className="card border-[color:var(--border)] p-5">
-        <h2 className="text-base font-semibold">Activate for installers</h2>
+        <h2 className="text-base font-semibold">Approve for installers</h2>
         <p className="mt-1 text-xs text-[color:var(--text-muted)]">
           {hasLines
-            ? 'When each line reads "Warehouse scanned", activate so PM and installers can work the same stickers on site.'
-            : 'Activate to release this empty project.'}
+            ? 'When each line reads "Warehouse scanned", approve so PM and installers can work the same stickers on site.'
+            : 'Approve to release this empty project.'}
         </p>
         <div className="mt-4 flex flex-wrap gap-3">
           <button
@@ -316,7 +316,7 @@ export default function ProjectLogisticsScanPage({
             }
             onClick={() => fulfillMut.mutate()}
           >
-            {fulfillMut.isPending ? 'Activating…' : 'Activate project'}
+            {fulfillMut.isPending ? 'Approving…' : 'Approve project'}
           </button>
           {!logisticsComplete && hasLines ? (
             <span className="self-center text-xs text-[color:var(--text-muted)]">

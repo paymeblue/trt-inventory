@@ -26,6 +26,15 @@ interface ProjectDetailPayload {
   items: ProjectItemRow[];
 }
 
+interface MetaQueueRow {
+  id: string;
+  name: string;
+  approvalStatus: string;
+  pendingDeleteRequested: boolean;
+  pendingPatch: unknown;
+  createdAt: string;
+}
+
 export default function SuperAdminApprovalsPage() {
   const user = useAuthedUser();
   const qc = useQueryClient();
@@ -37,6 +46,15 @@ export default function SuperAdminApprovalsPage() {
     queryFn: () =>
       fetchJson<{ projects: QueueRow[] }>(
         "/api/approvals/projects?queue=super_admin",
+      ),
+    enabled: user?.role === "super_admin",
+  });
+
+  const metaQuery = useQuery({
+    queryKey: queryKeys.approvalsSaMetadata,
+    queryFn: () =>
+      fetchJson<{ projects: MetaQueueRow[] }>(
+        "/api/approvals/projects?queue=super_admin_metadata",
       ),
     enabled: user?.role === "super_admin",
   });
@@ -99,9 +117,34 @@ export default function SuperAdminApprovalsPage() {
   }
 
   const rows = data?.projects ?? [];
+  const metaRows = metaQuery.data?.projects ?? [];
+
+  function patchKeys(raw: unknown): string {
+    if (!raw || typeof raw !== "object") return "";
+    return Object.keys(raw as object).join(", ");
+  }
 
   return (
     <div className="space-y-6">
+      {act.isPending &&
+        (act.variables?.action === "super_admin_approve" ||
+          act.variables?.action === "super_admin_approve_metadata_change") && (
+          <div
+            className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-black/85 text-[color:var(--primary-foreground)]"
+            aria-live="polite"
+            aria-busy
+          >
+            <div className="h-16 w-16 animate-spin rounded-full border-4 border-white border-t-transparent" />
+            <p className="mt-8 text-xl font-semibold text-white">
+              Approval in progress
+            </p>
+            <p className="mx-auto mt-3 max-w-sm text-center text-sm text-white/85">
+              Please wait—do not close this tab or navigate away until the
+              workflow finishes.
+            </p>
+          </div>
+        )}
+
       <div>
         <h1 className="text-2xl font-semibold">Pending creation approval</h1>
         <p className="text-sm text-[color:var(--text-muted)]">
@@ -165,6 +208,102 @@ export default function SuperAdminApprovalsPage() {
           ))}
         </ul>
       )}
+
+      <section className="border-t border-[color:var(--border)] pt-8">
+        <h2 className="text-xl font-semibold">
+          Updates &amp; delete requests for live projects
+        </h2>
+        <p className="mt-1 text-sm text-[color:var(--text-muted)]">
+          PMs and admins can propose changes while a project is active. Confirm
+          here so logistics can validate and apply (or fulfil a scheduled
+          deletion).
+        </p>
+        {metaQuery.error && (
+          <div className="mt-4 rounded-lg border border-[color:var(--danger)] p-3 text-sm text-[color:var(--danger)]">
+            {(metaQuery.error as Error).message}
+          </div>
+        )}
+        {metaQuery.isPending ? (
+          <p className="mt-4 text-sm text-[color:var(--text-muted)]">Loading…</p>
+        ) : metaRows.length === 0 ? (
+          <p className="mt-4 text-sm text-[color:var(--text-muted)]">
+            No queued metadata approvals.
+          </p>
+        ) : (
+          <ul className="mt-4 space-y-3">
+            {metaRows.map((p) => (
+              <li
+                key={p.id}
+                className="card flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div>
+                  <Link
+                    href={`/projects/${p.id}`}
+                    className="font-semibold hover:underline"
+                  >
+                    {p.name}
+                  </Link>
+                  <div className="mt-1 text-xs text-[color:var(--text-muted)]">
+                    Requested{" "}
+                    {new Date(p.createdAt).toLocaleString(undefined, {
+                      dateStyle: "short",
+                      timeStyle: "short",
+                    })}
+                  </div>
+                  <div className="mt-2 text-xs text-[color:var(--text)]">
+                    {p.pendingDeleteRequested ? (
+                      <span className="font-semibold text-[color:var(--danger)]">
+                        Project delete requested
+                      </span>
+                    ) : null}
+                    {p.pendingDeleteRequested && patchKeys(p.pendingPatch)
+                      ? " · "
+                      : null}
+                    {patchKeys(p.pendingPatch) ? (
+                      <span>
+                        Field updates: {patchKeys(p.pendingPatch)}
+                      </span>
+                    ) : null}
+                    {!p.pendingDeleteRequested && !patchKeys(p.pendingPatch) ? (
+                      <span className="text-[color:var(--text-muted)]">
+                        No additional detail supplied.
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    disabled={act.isPending}
+                    onClick={() =>
+                      act.mutate({
+                        id: p.id,
+                        action: "super_admin_approve_metadata_change",
+                      })
+                    }
+                  >
+                    Forward to logistics
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-danger btn-sm"
+                    disabled={act.isPending}
+                    onClick={() =>
+                      act.mutate({
+                        id: p.id,
+                        action: "super_admin_reject_metadata_change",
+                      })
+                    }
+                  >
+                    Reject request
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       {approveTargetId && (
         <div

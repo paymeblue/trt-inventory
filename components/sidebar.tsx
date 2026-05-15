@@ -2,6 +2,7 @@
 
 import {
   BookOpenIcon,
+  ChatBubbleLeftRightIcon,
   ChevronDownIcon,
   ClipboardDocumentListIcon,
   FolderIcon,
@@ -16,7 +17,10 @@ import {
 } from "@heroicons/react/24/outline";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { useState, type ComponentType, type SVGProps } from "react";
+import { fetchJson } from "@/lib/fetch-json";
+import { queryKeys } from "@/lib/query-keys";
 import { useSession } from "./session-context";
 import type { Role } from "@/db/schema";
 
@@ -65,6 +69,12 @@ const navMain: NavItem[] = [
     roles: ["installer"],
   },
   {
+    href: "/disputes",
+    label: "Disputes",
+    Icon: ChatBubbleLeftRightIcon,
+    roles: ["pm", "installer", "super_admin", "logistics"],
+  },
+  {
     href: "/team",
     label: "Team",
     Icon: UserGroupIcon,
@@ -107,6 +117,22 @@ export function Sidebar() {
   const [helpOpen, setHelpOpen] = useState(false);
   const nav = user ? navMain.filter((n) => n.roles.includes(user.role)) : [];
 
+  const { data: qc } = useQuery({
+    queryKey: queryKeys.approvalsQueueCounts,
+    queryFn: () =>
+      fetchJson<{
+        superAdminProjects: number;
+        logisticsProjects: number;
+        superAdminDisputes?: number;
+      }>("/api/approvals/queue-counts"),
+    enabled:
+      !!user && (user.role === "super_admin" || user.role === "logistics"),
+    staleTime: 15_000,
+    /** Super-admin disputes badge: others can open threads without this client mounted. */
+    refetchInterval:
+      user?.role === "super_admin" ? 60_000 : false,
+  });
+
   if (!user) return null;
 
   return (
@@ -131,6 +157,19 @@ export function Sidebar() {
               ? pathname === "/"
               : pathname === item.href || pathname.startsWith(`${item.href}/`);
           const { Icon } = item;
+          let queueBadge: number | undefined;
+          if (user.role === "super_admin") {
+            if (item.href === "/approvals/super-admin") {
+              queueBadge = qc?.superAdminProjects;
+            } else if (item.href === "/disputes") {
+              queueBadge = qc?.superAdminDisputes;
+            }
+          } else if (
+            item.href === "/approvals/logistics" &&
+            user.role === "logistics"
+          ) {
+            queueBadge = qc?.logisticsProjects;
+          }
           return (
             <Link
               key={item.href}
@@ -142,7 +181,18 @@ export function Sidebar() {
               }`}
             >
               <SidebarGlyph Icon={Icon} />
-              {item.label}
+              <span className="min-w-0 flex-1 truncate">{item.label}</span>
+              {typeof queueBadge === "number" && queueBadge > 0 ? (
+                <span
+                  className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold leading-none ${
+                    active
+                      ? "bg-white/25 text-[color:var(--primary-foreground)]"
+                      : "bg-[color:var(--danger)] text-white"
+                  }`}
+                >
+                  {queueBadge > 99 ? "99+" : queueBadge}
+                </span>
+              ) : null}
             </Link>
           );
         })}

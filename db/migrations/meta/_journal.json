@@ -71,6 +71,20 @@
       "when": 1778380800000,
       "tag": "0009_logistics_gate_order",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1778467200000,
+      "tag": "0010_project_categories_and_item_batches",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1778553600000,
+      "tag": "0011_metadata_change_pipeline_and_disputes",
+      "breakpoints": true
     }
   ]
 }
