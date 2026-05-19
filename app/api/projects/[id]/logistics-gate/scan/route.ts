@@ -56,6 +56,15 @@ async function handlePost(
         "This project is no longer waiting for logistics verification.",
       );
     }
+    if (result.kind === "insufficient_stock") {
+      return jsonError(
+        409,
+        `No on-hand stock left for SKU "${result.sku}".`,
+      );
+    }
+    if (result.kind === "sku_deleted") {
+      return jsonError(409, `SKU "${result.sku}" no longer exists on this project.`);
+    }
 
     return NextResponse.json({
       outcome: result.outcome,

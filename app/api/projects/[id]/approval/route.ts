@@ -6,11 +6,16 @@ import { orders, products, projects } from "@/db/schema";
 import { requireUserAny } from "@/lib/auth-guard";
 import { generateBarcode } from "@/lib/barcode";
 import { handleError, jsonError } from "@/lib/api";
+import { applyPendingCategoryAdds } from "@/lib/apply-pending-category-adds";
 import { ensureLogisticsGateOrder } from "@/lib/logistics-gate-order";
 import {
   METADATA_PENDING_LOGISTICS,
   METADATA_PENDING_SUPER_ADMIN,
 } from "@/lib/metadata-stages";
+import {
+  pendingPatchHasWork,
+  type ProjectPendingPatch,
+} from "@/lib/project-pending-patch";
 
 const bodySchema = z.object({
   action: z.enum([
@@ -26,22 +31,10 @@ const bodySchema = z.object({
   ]),
 });
 
-type PendingPatch = {
-  name?: string;
-  description?: string | null;
-  installerUserId?: string | null;
-};
-
-function effectivePendingPatch(
-  raw: unknown,
-): (PendingPatch & Record<string, unknown>) | null {
+function effectivePendingPatch(raw: unknown): ProjectPendingPatch | null {
   if (!raw || typeof raw !== "object") return null;
-  const o = raw as PendingPatch;
-  const hasAny =
-    o.name !== undefined ||
-    o.description !== undefined ||
-    o.installerUserId !== undefined;
-  return hasAny ? (o as PendingPatch & Record<string, unknown>) : null;
+  const o = raw as ProjectPendingPatch;
+  return pendingPatchHasWork(o) ? o : null;
 }
 
 /**
@@ -279,23 +272,45 @@ export async function POST(
         await db.delete(projects).where(eq(projects.id, id));
         return NextResponse.json({ deleted: true as const });
       }
-      const [updated] = await db
-        .update(projects)
-        .set({
-          ...(patch!.name !== undefined ? { name: patch!.name } : {}),
-          ...(patch!.description !== undefined
-            ? { description: patch!.description }
-            : {}),
-          ...(patch!.installerUserId !== undefined
-            ? { installerUserId: patch!.installerUserId }
-            : {}),
-          pendingPatch: null,
-          pendingDeleteRequested: false,
-          metadataChangeStage: null,
-          updatedAt: new Date(),
-        })
-        .where(eq(projects.id, id))
-        .returning();
+      const updated = await db.transaction(async (tx) => {
+        if (patch?.categoryAdds?.length) {
+          await applyPendingCategoryAdds(tx, {
+            projectId: id,
+            userId: auth.actor.userId,
+            adds: patch.categoryAdds,
+          });
+        }
+        const [proj] = await tx
+          .update(projects)
+          .set({
+            ...(patch?.name !== undefined ? { name: patch.name } : {}),
+            ...(patch?.description !== undefined
+              ? { description: patch.description }
+              : {}),
+            ...(patch?.installerUserId !== undefined
+              ? { installerUserId: patch.installerUserId }
+              : {}),
+            ...(patch?.siteAddress !== undefined
+              ? { siteAddress: patch.siteAddress }
+              : {}),
+            ...(patch?.siteLatitude !== undefined
+              ? { siteLatitude: patch.siteLatitude }
+              : {}),
+            ...(patch?.siteLongitude !== undefined
+              ? { siteLongitude: patch.siteLongitude }
+              : {}),
+            ...(patch?.geofenceRadiusMeters !== undefined
+              ? { geofenceRadiusMeters: patch.geofenceRadiusMeters }
+              : {}),
+            pendingPatch: null,
+            pendingDeleteRequested: false,
+            metadataChangeStage: null,
+            updatedAt: new Date(),
+          })
+          .where(eq(projects.id, id))
+          .returning();
+        return proj!;
+      });
       return NextResponse.json({ project: updated });
     }
 

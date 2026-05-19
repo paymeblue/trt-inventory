@@ -11,6 +11,7 @@ import {
   skuBaseFromLabel,
 } from "@/lib/sku-from-label";
 import { ConfirmModal } from "@/components/confirm-modal";
+import { ProjectEditPanel } from "@/components/project-edit-panel";
 import { StatusPill } from "@/components/status-pill";
 import { useAuthedUser } from "@/components/session-context";
 import {
@@ -57,6 +58,10 @@ interface Project {
   projectBarcode: string | null;
   metadataChangeStage: string | null;
   pendingDeleteRequested: boolean;
+  siteAddress: string | null;
+  siteLatitude: number | null;
+  siteLongitude: number | null;
+  geofenceRadiusMeters: number;
 }
 
 interface ProjectDetailResponse {
@@ -295,6 +300,11 @@ export default function ProjectDetailPage() {
               {project.description}
             </p>
           )}
+          {project.siteAddress && (
+            <p className="mt-1 max-w-2xl text-xs text-[color:var(--text-muted)]">
+              Site: {project.siteAddress}
+            </p>
+          )}
         </div>
         {canManage && (
           <div className="flex flex-wrap gap-2 self-start">
@@ -328,11 +338,14 @@ export default function ProjectDetailPage() {
       <ProjectApprovalBanners project={project} viewerRole={user.role} />
 
       {canManage && (
-        <InstallerAssignmentPanel
-          projectId={project.id}
-          installerUserId={project.installerUserId}
-          onChanged={mutate}
-        />
+        <>
+          <ProjectEditPanel project={project} onChanged={mutate} />
+          <InstallerAssignmentPanel
+            projectId={project.id}
+            installerUserId={project.installerUserId}
+            onChanged={mutate}
+          />
+        </>
       )}
 
       <ProjectInventorySection
@@ -492,8 +505,11 @@ function CategoriesManageSection({
   canEdit: boolean;
   onChanged: () => Promise<unknown>;
 }) {
+  const qc = useQueryClient();
   const [name, setName] = useState("");
+  const [quantity, setQuantity] = useState("1");
   const [busy, setBusy] = useState(false);
+  const [queuedMsg, setQueuedMsg] = useState<string | null>(null);
   const [delBusy, setDelBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -504,18 +520,29 @@ function CategoriesManageSection({
     setBusy(true);
     setError(null);
     try {
+      const qty = Math.max(1, Number.parseInt(quantity || "1", 10) || 1);
       const res = await fetch(`/api/projects/${projectId}/categories`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: n }),
+        body: JSON.stringify({ name: n, quantity: qty }),
       });
       const json = (await res.json().catch(() => ({}))) as {
         category?: ProjectCategory;
+        queuedForApproval?: boolean;
         error?: string;
       };
       if (!res.ok) throw new Error(json.error ?? "Could not save category");
+      if (json.queuedForApproval) {
+        setQueuedMsg(
+          `“${n}” (×${qty} units) queued for super-admin approval.`,
+        );
+      } else {
+        setQueuedMsg(null);
+      }
       setName("");
+      setQuantity("1");
       await onChanged();
+      await qc.invalidateQueries({ queryKey: queryKeys.approvalsQueueCounts });
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -549,22 +576,39 @@ function CategoriesManageSection({
   return (
     <div className="space-y-6 p-6">
       {canEdit ? (
-        <form onSubmit={addCategory} className="flex flex-wrap gap-3 md:items-end">
-          <label className="block min-w-[240px] flex-1">
-            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
-              New category name
-            </span>
-            <input
-              className="input w-full"
-              placeholder='e.g. Upper unit, Lower unit'
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </label>
-          <button type="submit" disabled={busy || !name.trim()} className="btn btn-primary">
-            {busy ? "Saving…" : "Save category"}
-          </button>
-        </form>
+        <>
+          <form onSubmit={addCategory} className="flex flex-wrap gap-3 md:items-end">
+            <label className="block min-w-[200px] flex-1">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
+                New category name
+              </span>
+              <input
+                className="input w-full"
+                placeholder='e.g. Upper unit, Lower unit'
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </label>
+            <label className="block w-28">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
+                Units
+              </span>
+              <input
+                type="number"
+                min={1}
+                className="input w-full text-right"
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+              />
+            </label>
+            <button type="submit" disabled={busy || !name.trim()} className="btn btn-primary">
+              {busy ? "Saving…" : "Add category"}
+            </button>
+          </form>
+          {queuedMsg ? (
+            <p className="text-xs text-[color:var(--info)]">{queuedMsg}</p>
+          ) : null}
+        </>
       ) : null}
 
       {error ? (

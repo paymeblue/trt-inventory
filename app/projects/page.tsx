@@ -5,7 +5,10 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/fetch-json";
 import { queryKeys } from "@/lib/query-keys";
-import { reassignAutoSkus } from "@/lib/sku-from-label";
+import {
+  AddressPicker,
+  type SiteSelection,
+} from "@/components/address-picker";
 import { useAuthedUser } from "@/components/session-context";
 import type { ProjectApprovalStatus } from "@/db/schema";
 
@@ -26,13 +29,10 @@ interface ProjectsResponse {
   projects: ProjectRow[];
 }
 
-interface DraftItem {
+interface DraftCategory {
   id: string;
-  sku: string;
   name: string;
-  stockQuantity: string;
-  /** When true, SKU was edited manually and won't be overwritten by auto-label. */
-  skuDirty?: boolean;
+  quantity: string;
 }
 
 /**
@@ -270,45 +270,32 @@ function NewProjectForm({
   onDone: () => Promise<void> | void;
   onCancel: () => void;
 }) {
+  const user = useAuthedUser();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [items, setItems] = useState<DraftItem[]>([
-    { id: crypto.randomUUID(), sku: "", name: "", stockQuantity: "1" },
+  const [site, setSite] = useState<SiteSelection | null>(null);
+  const [categories, setCategories] = useState<DraftCategory[]>([
+    { id: crypto.randomUUID(), name: "", quantity: "1" },
   ]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function updateItem(id: string, patch: Partial<DraftItem>) {
-    setItems((prev) => {
-      const next = prev.map((i) => {
-        if (i.id !== id) return i;
-        const merged: DraftItem = { ...i, ...patch };
-        if (patch.sku !== undefined && patch.name === undefined) {
-          merged.skuDirty = true;
-        }
-        if (patch.name !== undefined) {
-          merged.skuDirty = false;
-        }
-        return merged;
-      });
-      return reassignAutoSkus(next);
-    });
-  }
-
-  function addItem() {
-    setItems((prev) =>
-      reassignAutoSkus([
-        ...prev,
-        { id: crypto.randomUUID(), sku: "", name: "", stockQuantity: "1" },
-      ]),
+  function updateCategory(id: string, patch: Partial<DraftCategory>) {
+    setCategories((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, ...patch } : c)),
     );
   }
 
-  function removeItem(id: string) {
-    setItems((prev) =>
-      prev.length > 1
-        ? reassignAutoSkus(prev.filter((i) => i.id !== id))
-        : prev,
+  function addCategory() {
+    setCategories((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), name: "", quantity: "1" },
+    ]);
+  }
+
+  function removeCategory(id: string) {
+    setCategories((prev) =>
+      prev.length > 1 ? prev.filter((c) => c.id !== id) : prev,
     );
   }
 
@@ -317,28 +304,21 @@ function NewProjectForm({
     setBusy(true);
     setError(null);
     try {
-      const partial = items.filter(
-        (i) =>
-          (i.sku.trim().length > 0 && i.name.trim().length === 0) ||
-          (i.sku.trim().length === 0 && i.name.trim().length > 0),
-      );
-      if (partial.length > 0) {
-        setError("Each item row needs both a SKU and a name (or clear unused rows).");
+      if (user?.role === "pm" && !site) {
+        setError("Confirm the project site address before creating.");
         setBusy(false);
         return;
       }
 
-      const normalized = reassignAutoSkus(items);
-      const cleanItems = normalized
-        .map((i) => ({
-          sku: i.sku.trim(),
-          name: i.name.trim(),
-          stockQuantity: Math.max(
+      const cleanCategories = categories
+        .map((c) => ({
+          name: c.name.trim(),
+          quantity: Math.max(
             1,
-            Number.parseInt(i.stockQuantity || "1", 10) || 1,
+            Number.parseInt(c.quantity || "1", 10) || 1,
           ),
         }))
-        .filter((i) => i.sku && i.name);
+        .filter((c) => c.name);
 
       const res = await fetch("/api/projects", {
         method: "POST",
@@ -346,7 +326,14 @@ function NewProjectForm({
         body: JSON.stringify({
           name: name.trim(),
           description: description.trim() || undefined,
-          items: cleanItems,
+          categories: cleanCategories,
+          ...(site
+            ? {
+                siteAddress: site.siteAddress,
+                siteLatitude: site.siteLatitude,
+                siteLongitude: site.siteLongitude,
+              }
+            : {}),
         }),
       });
       const json = await res.json();
@@ -363,8 +350,9 @@ function NewProjectForm({
     <section className="card p-6">
       <h2 className="text-base font-semibold">New project</h2>
       <p className="text-xs text-[color:var(--text-muted)]">
-        Name the project and list the items it will track. You can add or
-        remove items later.
+        Set the project title, site address, and categories (each category
+        creates physical units with their own QR). Super-admin approves before
+        logistics activates the project.
       </p>
       <form onSubmit={onSubmit} className="mt-4 space-y-4">
         <label className="block">
@@ -395,53 +383,55 @@ function NewProjectForm({
           />
         </label>
 
+        <AddressPicker
+          value={site}
+          onChange={setSite}
+          required={user?.role === "pm"}
+        />
+
         <div>
           <div className="mb-2 flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
-              Items
+              Categories
             </span>
             <button
               type="button"
-              onClick={addItem}
+              onClick={addCategory}
               className="btn btn-ghost text-xs"
             >
-              + Add another
+              + Add category
             </button>
           </div>
           <div className="space-y-2">
-            {items.map((i) => (
+            {categories.map((c) => (
               <div
-                key={i.id}
-                className="grid gap-2 md:grid-cols-[1fr_2fr_7rem_auto]"
+                key={c.id}
+                className="grid gap-2 md:grid-cols-[2fr_7rem_auto]"
               >
                 <input
-                  className="input font-mono"
-                  placeholder="SKU"
-                  value={i.sku}
-                  onChange={(e) => updateItem(i.id, { sku: e.target.value })}
-                />
-                <input
                   className="input"
-                  placeholder="Name (e.g. Top Upper Unit) — SKU suggests automatically"
-                  value={i.name}
-                  onChange={(e) => updateItem(i.id, { name: e.target.value })}
+                  placeholder="Category name (e.g. Upper unit)"
+                  value={c.name}
+                  onChange={(e) =>
+                    updateCategory(c.id, { name: e.target.value })
+                  }
                 />
                 <input
                   type="number"
                   min={1}
                   className="input text-right"
-                  placeholder="Stock"
-                  value={i.stockQuantity}
+                  placeholder="Units"
+                  value={c.quantity}
                   onChange={(e) =>
-                    updateItem(i.id, { stockQuantity: e.target.value })
+                    updateCategory(c.id, { quantity: e.target.value })
                   }
                 />
                 <button
                   type="button"
-                  onClick={() => removeItem(i.id)}
-                  disabled={items.length === 1}
+                  onClick={() => removeCategory(c.id)}
+                  disabled={categories.length === 1}
                   className="btn btn-ghost text-xs"
-                  aria-label="Remove item"
+                  aria-label="Remove category"
                 >
                   ✕
                 </button>

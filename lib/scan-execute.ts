@@ -9,8 +9,15 @@ import {
   type Order,
 } from "@/db/schema";
 import { logOrderCompleteEvent } from "@/lib/order-complete-event";
+import {
+  distanceMeters,
+  isWithinGeofence,
+  projectHasGeofence,
+} from "@/lib/geofence";
 import { computeProgress, resolveScan, type ScanOutcome } from "@/lib/scan";
 import type { AuthenticatedActor } from "@/lib/auth-guard";
+
+export type ScanLocation = { latitude: number; longitude: number };
 
 export type ScanExecuteError =
   | { kind: "order_not_found" }
@@ -20,7 +27,11 @@ export type ScanExecuteError =
   /** Logged-in installer is not the project-assigned installer (QR sticker scans excluded). */
   | { kind: "installer_not_assigned" }
   /** Gate-order line must be scanned in the warehouse before on-site scans. */
-  | { kind: "logistics_not_verified"; sku: string };
+  | { kind: "logistics_not_verified"; sku: string }
+  /** In-app scan without GPS when the project has a geofence anchor. */
+  | { kind: "geofence_location_required" }
+  /** Scan coordinates are outside the project site radius. */
+  | { kind: "geofence_violation"; distanceMeters: number; radiusMeters: number };
 
 export interface ScanExecuteSuccess {
   kind: "ok";
@@ -53,10 +64,13 @@ export async function executeScan({
   orderId,
   barcode,
   actor,
+  scanLocation,
 }: {
   orderId: string;
   barcode: string;
   actor: AuthenticatedActor;
+  /** Required for in-app installer scans when the project has a site geofence. */
+  scanLocation?: ScanLocation | null;
 }): Promise<ScanExecuteResult> {
   const result = await db.transaction(async (tx): Promise<ScanExecuteResult> => {
     const order = await tx.query.orders.findFirst({
@@ -67,7 +81,12 @@ export async function executeScan({
 
     const project = await tx.query.projects.findFirst({
       where: eq(projects.id, order.projectId),
-      columns: { installerUserId: true },
+      columns: {
+        installerUserId: true,
+        siteLatitude: true,
+        siteLongitude: true,
+        geofenceRadiusMeters: true,
+      },
     });
     if (
       project?.installerUserId &&
@@ -110,37 +129,103 @@ export async function executeScan({
       }
       sku = matched.productId;
 
-      // Synthetic "Printed sticker" actor isn't a real users row — its
-      // userId would violate the FK on scanned_by_id / stock_movements.
-      // Both columns are nullable so we just write null and rely on the
-      // human-readable `actor.name` for the audit trail.
       const fkUserId = actor.isPrintedScan ? null : actor.userId;
 
-      const [prodRow] = await tx
-        .update(products)
-        .set({ stockQuantity: sql`${products.stockQuantity} - 1` })
-        .where(
-          and(
-            eq(products.projectId, order.projectId),
-            eq(products.sku, sku),
-            gte(products.stockQuantity, 1),
-          ),
-        )
-        .returning({ stock: products.stockQuantity, id: products.id });
+      const needsGeofence =
+        project && projectHasGeofence(project) && !actor.isPrintedScan;
+      let geofenceFlagged = false;
+      let scanLat: number | null = null;
+      let scanLng: number | null = null;
 
-      if (!prodRow) {
-        const exists = await tx.query.products.findFirst({
+      if (needsGeofence) {
+        if (!scanLocation) {
+          return { kind: "geofence_location_required" };
+        }
+        scanLat = scanLocation.latitude;
+        scanLng = scanLocation.longitude;
+        const radius = project!.geofenceRadiusMeters ?? 500;
+        const inside = isWithinGeofence(
+          project!.siteLatitude!,
+          project!.siteLongitude!,
+          scanLat,
+          scanLng,
+          radius,
+        );
+        if (!inside) {
+          const dist = distanceMeters(
+            project!.siteLatitude!,
+            project!.siteLongitude!,
+            scanLat,
+            scanLng,
+          );
+          return {
+            kind: "geofence_violation",
+            distanceMeters: Math.round(dist),
+            radiusMeters: radius,
+          };
+        }
+      } else if (scanLocation && project && projectHasGeofence(project)) {
+        scanLat = scanLocation.latitude;
+        scanLng = scanLocation.longitude;
+        const radius = project.geofenceRadiusMeters ?? 500;
+        geofenceFlagged = !isWithinGeofence(
+          project.siteLatitude!,
+          project.siteLongitude!,
+          scanLat,
+          scanLng,
+          radius,
+        );
+      }
+
+      const warehouseAlreadyCounted =
+        matched.logisticsScannedAt !== null &&
+        matched.logisticsScannedAt !== undefined;
+
+      if (!warehouseAlreadyCounted) {
+        const [prodRow] = await tx
+          .update(products)
+          .set({ stockQuantity: sql`${products.stockQuantity} - 1` })
+          .where(
+            and(
+              eq(products.projectId, order.projectId),
+              eq(products.sku, sku),
+              gte(products.stockQuantity, 1),
+            ),
+          )
+          .returning({ stock: products.stockQuantity, id: products.id });
+
+        if (!prodRow) {
+          const exists = await tx.query.products.findFirst({
+            where: and(
+              eq(products.projectId, order.projectId),
+              eq(products.sku, sku),
+            ),
+            columns: { id: true },
+          });
+          if (!exists) return { kind: "sku_deleted", sku };
+          return { kind: "insufficient_stock", sku };
+        }
+
+        stockAfter = prodRow.stock;
+
+        await tx.insert(stockMovements).values({
+          productId: prodRow.id,
+          delta: -1,
+          reason: "order_scan",
+          orderId,
+          orderItemId: outcome.itemId,
+          userId: fkUserId,
+        });
+      } else {
+        const prod = await tx.query.products.findFirst({
           where: and(
             eq(products.projectId, order.projectId),
             eq(products.sku, sku),
           ),
-          columns: { id: true },
+          columns: { stockQuantity: true },
         });
-        if (!exists) return { kind: "sku_deleted", sku };
-        return { kind: "insufficient_stock", sku };
+        if (prod) stockAfter = prod.stockQuantity;
       }
-
-      stockAfter = prodRow.stock;
 
       await tx
         .update(orderItems)
@@ -148,17 +233,11 @@ export async function executeScan({
           scannedAt: new Date(),
           scannedBy: actor.name,
           scannedById: fkUserId,
+          scanLatitude: scanLat,
+          scanLongitude: scanLng,
+          geofenceFlagged,
         })
         .where(eq(orderItems.id, outcome.itemId));
-
-      await tx.insert(stockMovements).values({
-        productId: prodRow.id,
-        delta: -1,
-        reason: "order_scan",
-        orderId,
-        orderItemId: outcome.itemId,
-        userId: fkUserId,
-      });
     }
 
     let updatedOrder = order;

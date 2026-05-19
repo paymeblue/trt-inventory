@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchJson } from "@/lib/fetch-json";
 import { packingLineCountForStock } from "@/lib/packing-lines";
+import { formatPendingPatchSummary } from "@/lib/project-pending-patch";
 import { invalidateAllApprovalSurface, queryKeys } from "@/lib/query-keys";
 import { useAuthedUser } from "@/components/session-context";
 
@@ -119,9 +120,8 @@ export default function SuperAdminApprovalsPage() {
   const rows = data?.projects ?? [];
   const metaRows = metaQuery.data?.projects ?? [];
 
-  function patchKeys(raw: unknown): string {
-    if (!raw || typeof raw !== "object") return "";
-    return Object.keys(raw as object).join(", ");
+  function patchSummaryLines(raw: unknown): string[] {
+    return formatPendingPatchSummary(raw);
   }
 
   return (
@@ -256,15 +256,15 @@ export default function SuperAdminApprovalsPage() {
                         Project delete requested
                       </span>
                     ) : null}
-                    {p.pendingDeleteRequested && patchKeys(p.pendingPatch)
-                      ? " · "
-                      : null}
-                    {patchKeys(p.pendingPatch) ? (
-                      <span>
-                        Field updates: {patchKeys(p.pendingPatch)}
-                      </span>
+                    {patchSummaryLines(p.pendingPatch).length > 0 ? (
+                      <ul className="mt-2 list-inside list-disc space-y-0.5">
+                        {patchSummaryLines(p.pendingPatch).map((line) => (
+                          <li key={line}>{line}</li>
+                        ))}
+                      </ul>
                     ) : null}
-                    {!p.pendingDeleteRequested && !patchKeys(p.pendingPatch) ? (
+                    {!p.pendingDeleteRequested &&
+                    patchSummaryLines(p.pendingPatch).length === 0 ? (
                       <span className="text-[color:var(--text-muted)]">
                         No additional detail supplied.
                       </span>

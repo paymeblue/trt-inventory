@@ -54,15 +54,56 @@ export const addProjectItemsBodySchema = z
     }
   });
 
+export const createProjectCategorySchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  quantity: z.coerce.number().int().min(1).max(500).default(1),
+});
+
+const siteFieldsSchema = z.object({
+  siteAddress: z.string().trim().min(3).max(500),
+  siteLatitude: z.number().finite().min(-90).max(90),
+  siteLongitude: z.number().finite().min(-180).max(180),
+  geofenceRadiusMeters: z.coerce.number().int().min(50).max(5000).optional(),
+});
+
 /** POST /api/projects body — parsed once here and in tests. */
-export const createProjectBodySchema = z.object({
-  name: z.string().trim().min(1, "Project name is required").max(120),
-  description: z.string().trim().max(500).optional(),
-  items: z
-    .array(projectItemInputSchema)
-    .max(200, "At most 200 items per request")
-    .nullish()
-    .transform((v) => v ?? []),
+export const createProjectBodySchema = z
+  .object({
+    name: z.string().trim().min(1, "Project name is required").max(120),
+    description: z.string().trim().max(500).optional(),
+    items: z
+      .array(projectItemInputSchema)
+      .max(200, "At most 200 items per request")
+      .nullish()
+      .transform((v) => v ?? []),
+    categories: z
+      .array(createProjectCategorySchema)
+      .max(50, "At most 50 categories per request")
+      .nullish()
+      .transform((v) => v ?? []),
+    siteAddress: z.string().trim().min(3).max(500).optional(),
+    siteLatitude: z.number().finite().optional(),
+    siteLongitude: z.number().finite().optional(),
+    geofenceRadiusMeters: z.coerce.number().int().min(50).max(5000).optional(),
+  })
+  .superRefine((val, ctx) => {
+    const hasSiteText = !!val.siteAddress?.trim();
+    const hasCoords =
+      val.siteLatitude !== undefined && val.siteLongitude !== undefined;
+    if (hasSiteText !== hasCoords) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "Project site requires a confirmed address with latitude and longitude",
+        path: ["siteAddress"],
+      });
+    }
+  });
+
+export const projectSitePatchSchema = siteFieldsSchema.partial().extend({
+  siteAddress: z.string().trim().min(3).max(500).optional(),
+  siteLatitude: z.number().finite().min(-90).max(90).optional(),
+  siteLongitude: z.number().finite().min(-180).max(180).optional(),
 });
 
 export type CreateProjectBody = z.infer<typeof createProjectBodySchema>;

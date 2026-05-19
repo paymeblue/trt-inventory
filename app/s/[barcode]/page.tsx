@@ -196,6 +196,41 @@ async function scanDeepLinkInner(
     );
   }
 
+  if (result.kind === 'geofence_location_required') {
+    return (
+      <OutcomeShell
+        status="blocked"
+        title="Location required"
+        body="Open this order in the installer app and allow GPS when scanning at the project site."
+        orderHref={orderHref}
+        hideNavigation={hideNavigation}
+      />
+    );
+  }
+
+  if (result.kind === 'geofence_violation') {
+    return (
+      <OutcomeShell
+        status="blocked"
+        title="Wrong location"
+        body={`This scan is about ${result.distanceMeters} m from the project site (limit ${result.radiusMeters} m). Move to the correct address and try again.`}
+        orderHref={orderHref}
+        hideNavigation={hideNavigation}
+      />
+    );
+  }
+
+  if (result.kind !== 'ok') {
+    return (
+      <OutcomeShell
+        status="blocked"
+        title="Scan failed"
+        body="Something went wrong. Try again or contact your PM."
+        hideNavigation={hideNavigation}
+      />
+    );
+  }
+
   return (
     <OutcomeView
       outcome={result.outcome}

@@ -555,10 +555,31 @@ function InstallerView({
       setPendingScans((n) => n + 1);
       let result: ScanCallResult;
       try {
+        const { readScanCoordinates } = await import('@/lib/scan-location');
+        let coords: { latitude: number; longitude: number } | undefined;
+        try {
+          coords = await readScanCoordinates();
+        } catch (locErr) {
+          result = {
+            kind: 'forbidden',
+            message: (locErr as Error).message,
+          };
+          setTransportError({
+            kind: 'forbidden',
+            message: (locErr as Error).message,
+            at: Date.now(),
+          });
+          setPendingScans((n) => Math.max(0, n - 1));
+          return;
+        }
         const res = await fetch(`/api/orders/${orderId}/scan`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ barcode }),
+          body: JSON.stringify({
+            barcode,
+            latitude: coords.latitude,
+            longitude: coords.longitude,
+          }),
         });
         let body: unknown;
         try {

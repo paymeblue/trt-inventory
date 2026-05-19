@@ -1,7 +1,13 @@
-import { eq } from "drizzle-orm";
+import { and, eq, gte, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { orderItems, orders, projects } from "@/db/schema";
-import type { Order } from "@/db/schema";
+import {
+  orderItems,
+  orders,
+  products,
+  projects,
+  stockMovements,
+  type Order,
+} from "@/db/schema";
 import type { AuthenticatedActor } from "@/lib/auth-guard";
 import {
   computeLogisticsProgress,
@@ -12,13 +18,16 @@ import {
 export type LogisticsScanExecuteError =
   | { kind: "order_not_found" }
   | { kind: "not_gate_order" }
-  | { kind: "wrong_project_status" };
+  | { kind: "wrong_project_status" }
+  | { kind: "insufficient_stock"; sku: string }
+  | { kind: "sku_deleted"; sku: string };
 
 export interface LogisticsScanExecuteOk {
   kind: "ok";
   outcome: ScanOutcome;
   order: Order;
   progress: ReturnType<typeof computeLogisticsProgress>;
+  stock?: { sku: string; stockQuantity: number };
 }
 
 export type LogisticsScanExecuteResult =
@@ -26,7 +35,8 @@ export type LogisticsScanExecuteResult =
   | LogisticsScanExecuteError;
 
 /**
- * Warehouse-side scan before project activation. Does not touch stock.
+ * Warehouse-side scan before project activation. Marks the gate line and
+ * decrements on-hand stock (one unit per scan).
  */
 export async function executeLogisticsScan({
   orderId,
@@ -74,7 +84,47 @@ export async function executeLogisticsScan({
       updatedOrder = row!;
     }
 
+    let stockAfter: { sku: string; stockQuantity: number } | undefined;
+
     if (outcome.result === "valid") {
+      const matched = items.find((i) => i.id === outcome.itemId)!;
+      const sku = matched.productId;
+
+      const [prodRow] = await tx
+        .update(products)
+        .set({ stockQuantity: sql`${products.stockQuantity} - 1` })
+        .where(
+          and(
+            eq(products.projectId, order.projectId),
+            eq(products.sku, sku),
+            gte(products.stockQuantity, 1),
+          ),
+        )
+        .returning({ stock: products.stockQuantity, id: products.id });
+
+      if (!prodRow) {
+        const exists = await tx.query.products.findFirst({
+          where: and(
+            eq(products.projectId, order.projectId),
+            eq(products.sku, sku),
+          ),
+          columns: { id: true },
+        });
+        if (!exists) return { kind: "sku_deleted", sku };
+        return { kind: "insufficient_stock", sku };
+      }
+
+      await tx.insert(stockMovements).values({
+        productId: prodRow.id,
+        delta: -1,
+        reason: "logistics_scan",
+        orderId,
+        orderItemId: outcome.itemId,
+        userId: fkUserId,
+      });
+
+      stockAfter = { sku, stockQuantity: prodRow.stock };
+
       await tx
         .update(orderItems)
         .set({
@@ -94,6 +144,7 @@ export async function executeLogisticsScan({
       outcome,
       order: updatedOrder,
       progress: computeLogisticsProgress(freshItems),
+      stock: stockAfter,
     };
   });
 }

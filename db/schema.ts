@@ -1,6 +1,7 @@
 import { relations, sql } from "drizzle-orm";
 import {
   boolean,
+  doublePrecision,
   integer,
   jsonb,
   pgEnum,
@@ -112,6 +113,13 @@ export const projects = pgTable(
       .default(false),
     /** Logistics-level project sticker; minted when super-admin approves. */
     projectBarcode: text("project_barcode"),
+    /** Canonical install site — installer scans must be within geofence. */
+    siteAddress: text("site_address"),
+    siteLatitude: doublePrecision("site_latitude"),
+    siteLongitude: doublePrecision("site_longitude"),
+    geofenceRadiusMeters: integer("geofence_radius_meters")
+      .notNull()
+      .default(500),
   },
   (t) => [uniqueIndex("projects_name_unique").on(t.name)],
 );
@@ -212,6 +220,11 @@ export const orderItems = pgTable(
     logisticsScannedAt: timestamp("logistics_scanned_at", { withTimezone: true }),
     logisticsScannedBy: text("logistics_scanned_by"),
     logisticsScannedById: uuid("logistics_scanned_by_id").references(() => users.id),
+    scanLatitude: doublePrecision("scan_latitude"),
+    scanLongitude: doublePrecision("scan_longitude"),
+    geofenceFlagged: boolean("geofence_flagged").notNull().default(false),
+    logisticsScanLatitude: doublePrecision("logistics_scan_latitude"),
+    logisticsScanLongitude: doublePrecision("logistics_scan_longitude"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

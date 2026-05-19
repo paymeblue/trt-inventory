@@ -10,38 +10,20 @@ import {
   METADATA_PENDING_LOGISTICS,
   METADATA_PENDING_SUPER_ADMIN,
 } from "@/lib/metadata-stages";
+import { projectLivesOnSite } from "@/lib/project-live";
+import {
+  mergeProjectPendingPatch,
+  type ProjectPendingPatch,
+} from "@/lib/project-pending-patch";
+import { projectSitePatchSchema } from "@/lib/project-validation";
 
-const updateSchema = z.object({
-  name: z.string().trim().min(1).max(120).optional(),
-  description: z.string().trim().max(500).nullable().optional(),
-  installerUserId: z.string().uuid().nullable().optional(),
-});
-
-type PendingPatch = {
-  name?: string;
-  description?: string | null;
-  installerUserId?: string | null;
-};
-
-function mergePending(
-  current: unknown,
-  incoming: { name?: string; description?: string | null; installerUserId?: string | null },
-): PendingPatch {
-  const base =
-    current && typeof current === "object"
-      ? (current as PendingPatch)
-      : {};
-  return {
-    ...base,
-    ...(incoming.name !== undefined ? { name: incoming.name } : {}),
-    ...(incoming.description !== undefined
-      ? { description: incoming.description }
-      : {}),
-    ...(incoming.installerUserId !== undefined
-      ? { installerUserId: incoming.installerUserId }
-      : {}),
-  };
-}
+const updateSchema = z
+  .object({
+    name: z.string().trim().min(1).max(120).optional(),
+    description: z.string().trim().max(500).nullable().optional(),
+    installerUserId: z.string().uuid().nullable().optional(),
+  })
+  .merge(projectSitePatchSchema);
 
 /**
  * GET /api/projects/[id] → full project detail: the project row, its
@@ -159,29 +141,59 @@ export async function PATCH(
       }
     }
 
+    const hasSitePatch =
+      body.siteAddress !== undefined ||
+      body.siteLatitude !== undefined ||
+      body.siteLongitude !== undefined;
+    if (
+      hasSitePatch &&
+      (body.siteAddress === undefined ||
+        body.siteLatitude === undefined ||
+        body.siteLongitude === undefined)
+    ) {
+      return jsonError(
+        400,
+        "Site updates require address, latitude, and longitude together",
+      );
+    }
+
     const hasIncoming =
       body.name !== undefined ||
       body.description !== undefined ||
-      body.installerUserId !== undefined;
+      body.installerUserId !== undefined ||
+      hasSitePatch ||
+      body.geofenceRadiusMeters !== undefined;
     if (!hasIncoming) {
       return jsonError(400, "No fields to update");
     }
 
-    const livesOnSite =
-      existing.approvalStatus === "active" ||
-      existing.approvalStatus === "pending_logistics";
+    const livesOnSite = projectLivesOnSite(existing.approvalStatus);
+    const patchIncoming: ProjectPendingPatch = {
+      ...(body.name !== undefined ? { name: body.name } : {}),
+      ...(body.description !== undefined
+        ? { description: body.description ?? null }
+        : {}),
+      ...(body.installerUserId !== undefined
+        ? { installerUserId: body.installerUserId }
+        : {}),
+      ...(body.siteAddress !== undefined ? { siteAddress: body.siteAddress } : {}),
+      ...(body.siteLatitude !== undefined
+        ? { siteLatitude: body.siteLatitude }
+        : {}),
+      ...(body.siteLongitude !== undefined
+        ? { siteLongitude: body.siteLongitude }
+        : {}),
+      ...(body.geofenceRadiusMeters !== undefined
+        ? { geofenceRadiusMeters: body.geofenceRadiusMeters }
+        : {}),
+    };
 
     /** Live projects: metadata changes queue for SA → logistics (every role, incl. super_admin). */
     if (livesOnSite && hasIncoming) {
-      const merged = mergePending(existing.pendingPatch, {
-        ...(body.name !== undefined ? { name: body.name } : {}),
-        ...(body.description !== undefined
-          ? { description: body.description ?? null }
-          : {}),
-        ...(body.installerUserId !== undefined
-          ? { installerUserId: body.installerUserId }
-          : {}),
-      });
+      const merged = mergeProjectPendingPatch(
+        existing.pendingPatch,
+        patchIncoming,
+      );
       const [updated] = await db
         .update(projects)
         .set({
@@ -206,6 +218,18 @@ export async function PATCH(
           : {}),
         ...(body.installerUserId !== undefined
           ? { installerUserId: body.installerUserId }
+          : {}),
+        ...(body.siteAddress !== undefined
+          ? { siteAddress: body.siteAddress }
+          : {}),
+        ...(body.siteLatitude !== undefined
+          ? { siteLatitude: body.siteLatitude }
+          : {}),
+        ...(body.siteLongitude !== undefined
+          ? { siteLongitude: body.siteLongitude }
+          : {}),
+        ...(body.geofenceRadiusMeters !== undefined
+          ? { geofenceRadiusMeters: body.geofenceRadiusMeters }
           : {}),
         updatedAt: new Date(),
       })

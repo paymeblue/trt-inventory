@@ -1,7 +1,19 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { asc, count, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { orders, products, projects, stockMovements } from "@/db/schema";
+import {
+  orders,
+  products,
+  projectCategories,
+  projects,
+  stockMovements,
+} from "@/db/schema";
+import { DEFAULT_GEOFENCE_RADIUS_M } from "@/lib/geofence";
+import {
+  insertPhysicalUnitsForProject,
+  loadProjectSkuSet,
+  newBatchId,
+} from "@/lib/project-items-create";
 import { requireUser, requireUserAny } from "@/lib/auth-guard";
 import { handleError, jsonError } from "@/lib/api";
 import {
@@ -127,6 +139,18 @@ export async function POST(req: NextRequest) {
 
     const body = createProjectBodySchema.parse(raw);
 
+    const isPm = auth.actor.role === "pm";
+    const hasSite =
+      body.siteAddress &&
+      body.siteLatitude !== undefined &&
+      body.siteLongitude !== undefined;
+    if (isPm && !hasSite) {
+      return jsonError(
+        400,
+        "Project site address is required. Confirm the location before creating the project.",
+      );
+    }
+
     const dupe = findDuplicateSkuInPayload(body.items);
     if (dupe) {
       return jsonError(400, `Duplicate SKU "${dupe}" in items list`);
@@ -155,6 +179,15 @@ export async function POST(req: NextRequest) {
               auth.actor.role === "super_admin"
                 ? "active"
                 : "pending_super_admin",
+            ...(hasSite
+              ? {
+                  siteAddress: body.siteAddress!,
+                  siteLatitude: body.siteLatitude!,
+                  siteLongitude: body.siteLongitude!,
+                  geofenceRadiusMeters:
+                    body.geofenceRadiusMeters ?? DEFAULT_GEOFENCE_RADIUS_M,
+                }
+              : {}),
           })
           .returning();
 
@@ -182,7 +215,37 @@ export async function POST(req: NextRequest) {
           await tx.insert(stockMovements).values(initialMoves);
         }
 
-        return { project, items: insertedItems };
+        const categoryCreated: { id: string; name: string }[] = [];
+        if (body.categories.length > 0) {
+          let pool = await loadProjectSkuSet(tx, project.id);
+          for (const catInput of body.categories) {
+            const [cat] = await tx
+              .insert(projectCategories)
+              .values({
+                projectId: project.id,
+                name: catInput.name.trim(),
+              })
+              .returning();
+            categoryCreated.push({ id: cat.id, name: cat.name });
+            await insertPhysicalUnitsForProject(tx, {
+              projectId: project.id,
+              userId: auth.actor.userId,
+              quantity: catInput.quantity,
+              categoryId: cat.id,
+              batchId: newBatchId(),
+              skuLabelSource: cat.name,
+              displayNameForUnit: () => cat.name,
+              existingSkusLower: pool,
+            });
+            pool = await loadProjectSkuSet(tx, project.id);
+          }
+        }
+
+        return {
+          project,
+          items: insertedItems,
+          categories: categoryCreated,
+        };
       });
     } catch (err) {
       if (isUniqueViolation(err)) {
