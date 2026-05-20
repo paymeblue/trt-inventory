@@ -68,8 +68,8 @@ export function formatPendingPatchSummary(patch: unknown): string[] {
   if (p.installerUserId !== undefined) {
     lines.push(
       p.installerUserId
-        ? `Installer assignment updated`
-        : `Installer cleared (any installer)`,
+        ? `Receiver assignment updated`
+        : `Receiver cleared (any receiver)`,
     );
   }
   if (p.siteAddress !== undefined) {

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/fetch-json";
 import { useAuthedUser } from "@/components/session-context";
+import { PageLoading } from "@/components/page-loading";
 
 interface DisputeListRow {
   id: string;
@@ -55,7 +56,7 @@ export default function DisputesListPage() {
       )}
 
       {isPending ? (
-        <p className="text-sm text-[color:var(--text-muted)]">Loading disputes…</p>
+        <PageLoading message="Loading disputes…" />
       ) : rows.length === 0 ? (
         <p className="text-sm text-[color:var(--text-muted)]">
           Nothing here yet—open{" "}

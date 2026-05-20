@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import type { IScannerControls } from "@zxing/browser";
 
-import { extractBarcodeFromPayload } from "@/lib/scan-deep-link";
+import { normalizeScanBarcode } from "@/lib/scan-deep-link";
+import { QrCodeLoader } from "@/components/qr-code-loader";
 
 interface ScanInputProps {
   onScan: (value: string) => void;
@@ -48,7 +49,7 @@ export function ScanInput({ onScan, disabled, busy = false }: ScanInputProps) {
   const payloadRef = useRef<(raw: string) => void>(() => undefined);
   payloadRef.current = (raw: string) => {
     if (disabled || busyRef.current) return;
-    const barcode = extractBarcodeFromPayload(raw);
+    const barcode = normalizeScanBarcode(raw);
     if (!barcode) return;
     onScan(barcode);
   };
@@ -173,10 +174,7 @@ export function ScanInput({ onScan, disabled, busy = false }: ScanInputProps) {
             role="status"
             aria-live="polite"
           >
-            <span
-              className="inline-block size-3.5 shrink-0 animate-spin rounded-full border-2 border-[color:var(--primary)] border-t-transparent"
-              aria-hidden
-            />
+            <QrCodeLoader size={36} label="Verifying scan" flat />
             <span>
               Recording verification — hang on until this finishes before
               scanning the next item.
@@ -196,10 +194,7 @@ export function ScanInput({ onScan, disabled, busy = false }: ScanInputProps) {
             <button type="submit" className="btn btn-primary" disabled={blocked}>
               {busy ? (
                 <span className="inline-flex items-center gap-2">
-                  <span
-                    className="inline-block size-4 shrink-0 animate-spin rounded-full border-2 border-[color:var(--primary-foreground)] border-t-transparent"
-                    aria-hidden
-                  />
+                  <QrCodeLoader size={32} label="Verifying" flat />
                   Verifying…
                 </span>
               ) : (
@@ -224,10 +219,7 @@ export function ScanInput({ onScan, disabled, busy = false }: ScanInputProps) {
                   aria-live="polite"
                 >
                   <div className="flex items-center gap-2 rounded-lg bg-black/80 px-4 py-2 text-sm font-medium text-white">
-                    <span
-                      className="inline-block size-4 shrink-0 animate-spin rounded-full border-2 border-white border-t-transparent"
-                      aria-hidden
-                    />
+                    <QrCodeLoader size={32} label="Verifying" flat />
                     Verifying…
                   </div>
                 </div>

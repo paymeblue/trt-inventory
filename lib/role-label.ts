@@ -5,7 +5,7 @@ export function roleShortLabel(role: Role): string {
     case "pm":
       return "PM";
     case "installer":
-      return "Installer";
+      return "Receiver";
     case "logistics":
       return "Logistics";
     case "super_admin":

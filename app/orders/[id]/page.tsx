@@ -17,6 +17,8 @@ import { QrCode } from '@/components/qr-code';
 import { buildScanUrl } from '@/lib/scan-url';
 import { StatusPill } from '@/components/status-pill';
 import { ScanInput } from '@/components/scan-input';
+import { PageLoading } from '@/components/page-loading';
+import { QrCodeLoader } from '@/components/qr-code-loader';
 import { Tour, type TourStep } from '@/components/tour';
 import type { Order, OrderItem, Product, Project } from '@/db/schema';
 import type { ScanOutcome } from '@/lib/scan';
@@ -142,7 +144,7 @@ export default function OrderDetailPage({
 
   if (orderQuery.isPending) {
     return (
-      <div className="text-sm text-[color:var(--text-muted)]">Loading…</div>
+      <PageLoading message="Loading order…" />
     );
   }
 
@@ -935,10 +937,7 @@ function TrackCards({
           role="status"
           aria-live="polite"
         >
-          <span
-            className="inline-block size-3.5 shrink-0 animate-spin rounded-full border-2 border-[color:var(--primary)] border-t-transparent"
-            aria-hidden
-          />
+          <QrCodeLoader size={32} label="Verifying items" flat />
           <span>
             Verifying {pendingScans} item{pendingScans === 1 ? '' : 's'}…
           </span>
@@ -1127,10 +1126,7 @@ function ScanFeed({ entries, busy }: { entries: FeedEntry[]; busy?: boolean }) {
           role="status"
           aria-live="polite"
         >
-          <span
-            className="inline-block size-3.5 shrink-0 animate-spin rounded-full border-2 border-[color:var(--primary)] border-t-transparent"
-            aria-hidden
-          />
+          <QrCodeLoader size={32} label="Verifying items" flat />
           <span>Recording this verification…</span>
         </div>
       )}

@@ -1,18 +1,20 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { use, useCallback, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { use, useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Order, OrderItem, Project } from '@/db/schema';
 import type { ScanOutcome } from '@/lib/scan';
 import { fetchJson } from '@/lib/fetch-json';
 import { queryKeys } from '@/lib/query-keys';
 import { buildScanUrl } from '@/lib/scan-url';
+import { normalizeScanBarcode } from '@/lib/scan-deep-link';
 import { QrCode } from '@/components/qr-code';
 import { ScanInput } from '@/components/scan-input';
 import { useAuthedUser } from '@/components/session-context';
 import { ResourceLoadError } from '@/components/resource-load-error';
+import { PageLoading } from '@/components/page-loading';
 
 type OrderItemOut = OrderItem & { printedScanToken?: string };
 
@@ -28,14 +30,34 @@ interface GatePayload {
   };
 }
 
-function logisticsFlashForOutcome(outcome: ScanOutcome): string {
+function logisticsFlashForOutcome(
+  outcome: ScanOutcome,
+  ctx: {
+    projectBarcode: string | null;
+    packingBarcodes: string[];
+    lastScanned?: string;
+  },
+): string {
   switch (outcome.result) {
     case 'valid':
-      return 'Warehouse line recorded.';
+      return 'Warehouse line recorded. On-hand stock was updated for this SKU.';
     case 'duplicate':
       return 'Already scanned in the warehouse.';
-    case 'invalid':
-      return 'Unknown code for this shipment — try again.';
+    case 'invalid': {
+      const scanned = normalizeScanBarcode(
+        outcome.barcode || ctx.lastScanned || '',
+      );
+      if (
+        ctx.projectBarcode &&
+        scanned === normalizeScanBarcode(ctx.projectBarcode)
+      ) {
+        return `That is the project reference (${ctx.projectBarcode}), not a box sticker. Scan the packing QR beside the SKU below — e.g. ${ctx.packingBarcodes[0] ?? 'TRT-…'}.`;
+      }
+      if (ctx.packingBarcodes.length === 1) {
+        return `This code is not on the warehouse list. Scan the packing sticker: ${ctx.packingBarcodes[0]}.`;
+      }
+      return 'Unknown code for this shipment. Scan one of the packing stickers listed below (each starts with TRT-).';
+    }
     default:
       return 'Scan completed.';
   }
@@ -48,15 +70,20 @@ export default function ProjectLogisticsScanPage({
 }) {
   const { id: projectId } = use(params);
   const router = useRouter();
+  const searchParams = useSearchParams();
   const qc = useQueryClient();
   const user = useAuthedUser();
   const [flash, setFlash] = useState<string | null>(null);
+  const deepLinkScanDone = useRef(false);
+
+  const canWarehouseScan =
+    user?.role === 'logistics' || user?.role === 'super_admin';
 
   const gateQuery = useQuery({
     queryKey: queryKeys.logisticsGate(projectId),
     queryFn: () =>
       fetchJson<GatePayload>(`/api/projects/${projectId}/logistics-gate`),
-    enabled: user?.role === 'logistics',
+    enabled: canWarehouseScan,
     refetchInterval: (q) => {
       const d = q.state.data as GatePayload | undefined;
       if (!d || d.progress.remaining === 0) return false;
@@ -102,40 +129,66 @@ export default function ProjectLogisticsScanPage({
 
   const onManualScan = useCallback(
     async (barcodeRaw: string) => {
-      const barcode = barcodeRaw.trim();
+      const barcode = normalizeScanBarcode(barcodeRaw);
       if (!barcode) return;
       setFlash(null);
+      const packingBarcodes =
+        gateQuery.data?.items.map((i) => i.barcode) ?? [];
+      const projectBarcode = gateQuery.data?.project.projectBarcode ?? null;
       try {
         const res = await scanMut.mutateAsync(barcode);
-        setFlash(logisticsFlashForOutcome(res.outcome));
+        setFlash(
+          logisticsFlashForOutcome(res.outcome, {
+            projectBarcode,
+            packingBarcodes,
+            lastScanned: barcode,
+          }),
+        );
       } catch (e) {
         setFlash(
           e instanceof Error ? e.message : 'Warehouse scan failed — try again.',
         );
       }
     },
-    [scanMut],
+    [scanMut, gateQuery.data],
   );
+
+  const pendingDeepLinkBarcode = searchParams.get('scan')?.trim() ?? '';
+
+  useEffect(() => {
+    if (
+      !canWarehouseScan ||
+      !pendingDeepLinkBarcode ||
+      !gateQuery.data ||
+      deepLinkScanDone.current
+    ) {
+      return;
+    }
+    deepLinkScanDone.current = true;
+    void onManualScan(pendingDeepLinkBarcode);
+  }, [
+    canWarehouseScan,
+    pendingDeepLinkBarcode,
+    gateQuery.data,
+    onManualScan,
+  ]);
 
   if (!user) return null;
 
-  if (user.role !== 'logistics') {
+  if (!canWarehouseScan) {
     return (
       <div className="card p-6">
-        <h1 className="text-lg font-semibold">Logistics only</h1>
+        <h1 className="text-lg font-semibold">Warehouse scan</h1>
         <p className="mt-2 text-sm text-[color:var(--text-muted)]">
-          Warehouse verification is restricted to logistics accounts.
+          Warehouse verification is for logistics or super-admin accounts. Open
+          Awaiting logistics from the sidebar if you have access.
         </p>
       </div>
     );
   }
 
   if (gateQuery.isPending) {
-    return (
-      <p className="text-sm text-[color:var(--text-muted)]">
-        Loading warehouse list…
-      </p>
-    );
+    return <PageLoading message="Loading warehouse list…" />;
   }
 
   if (gateQuery.isError || !gateQuery.data) {
@@ -184,16 +237,18 @@ export default function ProjectLogisticsScanPage({
           Warehouse scan — {data.project.name}
         </h1>
         <p className="mt-2 text-sm text-[color:var(--text-muted)]">
-          Scan each packing QR the same way installers will on site. Nothing is
-          deducted from stock yet — stocking updates still happen when
-          installers scan after this project is active.
+          Warehouse verification — scan each packing QR here first. This is
+          required before you activate the project. Receivers scan the same
+          stickers on site only after every line shows Warehouse scanned.
         </p>
         {data.project.projectBarcode && (
-          <p className="mt-2 font-mono text-xs text-[color:var(--text-muted)]">
-            Project barcode:{' '}
-            <span className="font-semibold text-[color:var(--text)]">
+          <p className="mt-2 text-xs text-[color:var(--text-muted)]">
+            Project reference{' '}
+            <span className="font-mono font-semibold text-[color:var(--text)]">
               {data.project.projectBarcode}
-            </span>
+            </span>{' '}
+            — for paperwork only; do not scan this in the warehouse. Scan each
+            packing sticker (TRT-…) in the list below.
           </p>
         )}
       </header>
@@ -230,7 +285,10 @@ export default function ProjectLogisticsScanPage({
             Scanner
           </header>
           <div className="p-5">
-            <ScanInput onScan={(b) => void onManualScan(b)} />
+            <ScanInput
+              busy={scanMut.isPending}
+              onScan={(b) => void onManualScan(b)}
+            />
 
             {(flash ?? scanMut.isError) && (
               <p
@@ -285,14 +343,26 @@ export default function ProjectLogisticsScanPage({
                       {it.barcode}
                     </div>
                   </div>
-                  <Link
-                    className="btn btn-ghost btn-sm shrink-0 self-start"
-                    href={url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Open sticker URL
-                  </Link>
+                  <div className="flex shrink-0 flex-col gap-2 self-start">
+                    {!picked ? (
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        disabled={scanMut.isPending}
+                        onClick={() => void onManualScan(it.barcode)}
+                      >
+                        Scan this box
+                      </button>
+                    ) : null}
+                    <Link
+                      className="btn btn-ghost btn-sm"
+                      href={url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Open sticker URL
+                    </Link>
+                  </div>
                 </li>
               );
             })}
@@ -304,7 +374,7 @@ export default function ProjectLogisticsScanPage({
         <h2 className="text-base font-semibold">Approve for installers</h2>
         <p className="mt-1 text-xs text-[color:var(--text-muted)]">
           {hasLines
-            ? 'When each line reads "Warehouse scanned", approve so PM and installers can work the same stickers on site.'
+            ? 'When each line reads "Warehouse scanned", approve so receivers can verify the same stickers on site.'
             : 'Approve to release this empty project.'}
         </p>
         <div className="mt-4 flex flex-wrap gap-3">

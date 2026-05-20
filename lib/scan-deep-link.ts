@@ -55,3 +55,15 @@ export function extractBarcodeFromPayload(payload: string): string {
     return raw;
   }
 }
+
+/**
+ * Normalizes scanner input (URL, bare code, mixed case) for API matching.
+ */
+export function normalizeScanBarcode(payload: string): string {
+  const extracted = extractBarcodeFromPayload(payload).trim();
+  if (!extracted) return "";
+  if (/^trt-/i.test(extracted)) {
+    return extracted.toUpperCase();
+  }
+  return extracted;
+}

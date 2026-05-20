@@ -373,6 +373,26 @@ describe("resolveLogisticsScan", () => {
     });
     expect(res.outcome).toEqual({ result: "duplicate", itemId: "1" });
   });
+
+  it("matches barcodes case-insensitively", () => {
+    const items = [lItem("1", "TRT-ABC123DEF456")];
+    const res = resolveLogisticsScan({
+      barcode: "trt-abc123def456",
+      items,
+      orderStatus: "active",
+    });
+    expect(res.outcome).toEqual({ result: "valid", itemId: "1" });
+  });
+
+  it("does not mark the gate order anomaly on a wrong code", () => {
+    const res = resolveLogisticsScan({
+      barcode: "TRT-WRONG",
+      items: [lItem("1", "TRT-A")],
+      orderStatus: "active",
+    });
+    expect(res.outcome).toEqual({ result: "invalid", barcode: "TRT-WRONG" });
+    expect(res.nextStatus).toBeUndefined();
+  });
 });
 
 describe("computeLogisticsProgress", () => {

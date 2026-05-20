@@ -9,6 +9,7 @@ import {
   type Order,
 } from "@/db/schema";
 import type { AuthenticatedActor } from "@/lib/auth-guard";
+import { normalizeScanBarcode } from "@/lib/scan-deep-link";
 import {
   computeLogisticsProgress,
   resolveLogisticsScan,
@@ -47,6 +48,7 @@ export async function executeLogisticsScan({
   barcode: string;
   actor: AuthenticatedActor;
 }): Promise<LogisticsScanExecuteResult> {
+  const normalizedBarcode = normalizeScanBarcode(barcode);
   return db.transaction(async (tx) => {
     const order = await tx.query.orders.findFirst({
       where: eq(orders.id, orderId),
@@ -69,7 +71,7 @@ export async function executeLogisticsScan({
     });
 
     const { outcome, nextStatus } = resolveLogisticsScan({
-      barcode,
+      barcode: normalizedBarcode,
       items,
       orderStatus: order.status,
     });

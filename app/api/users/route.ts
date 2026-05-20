@@ -10,6 +10,12 @@ import { handleError, jsonError } from "@/lib/api";
 const createSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
   name: z.string().trim().min(1).max(120),
+  phone: z
+    .string()
+    .trim()
+    .max(32)
+    .optional()
+    .transform((v) => (v && v.length > 0 ? v : undefined)),
   password: z.string().min(8, "Password must be at least 8 characters").max(200),
   role: z
     .enum(["pm", "installer", "logistics", "super_admin"])
@@ -25,6 +31,7 @@ export async function GET() {
         id: users.id,
         email: users.email,
         name: users.name,
+        phone: users.phone,
         role: users.role,
         createdById: users.createdById,
         createdAt: users.createdAt,
@@ -65,6 +72,7 @@ export async function POST(req: NextRequest) {
       .values({
         email: body.email,
         name: body.name,
+        phone: body.phone ?? null,
         role: body.role,
         passwordHash,
         createdById: auth.actor.userId,
@@ -73,6 +81,7 @@ export async function POST(req: NextRequest) {
         id: users.id,
         email: users.email,
         name: users.name,
+        phone: users.phone,
         role: users.role,
         createdAt: users.createdAt,
       });

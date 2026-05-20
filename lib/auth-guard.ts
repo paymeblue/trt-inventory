@@ -1,6 +1,7 @@
 import { getSession, type SessionData } from "./session";
 import { jsonError } from "./api";
 import type { Role } from "@/db/schema";
+import { friendlyRoleDeniedMessage } from "./role-denied-message";
 
 export interface AuthenticatedActor {
   userId: string;
@@ -65,7 +66,10 @@ export async function requireUser(
       return { error: jsonError(401, "Not authenticated") };
     }
     return {
-      error: jsonError(403, `This action requires the ${requiredRole} role`),
+      error: jsonError(
+        403,
+        friendlyRoleDeniedMessage(actor!.role, [requiredRole!]),
+      ),
     };
   }
   return { actor: check.actor };
@@ -86,7 +90,7 @@ export async function requireUserAny(
     return {
       error: jsonError(
         403,
-        `This action requires one of: ${allowed.join(", ")}`,
+        friendlyRoleDeniedMessage(actor.role, allowed),
       ),
     };
   }

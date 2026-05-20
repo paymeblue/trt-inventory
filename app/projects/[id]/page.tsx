@@ -14,6 +14,7 @@ import { ConfirmModal } from "@/components/confirm-modal";
 import { ProjectEditPanel } from "@/components/project-edit-panel";
 import { StatusPill } from "@/components/status-pill";
 import { useAuthedUser } from "@/components/session-context";
+import { PageLoading } from "@/components/page-loading";
 import {
   METADATA_PENDING_LOGISTICS,
   METADATA_PENDING_SUPER_ADMIN,
@@ -241,8 +242,8 @@ export default function ProjectDetailPage() {
 
   if (isLoading || !data) {
     return (
-      <div className="card p-10 text-center text-sm text-[color:var(--text-muted)]">
-        Loading project…
+      <div className="card p-6">
+        <PageLoading message="Loading project…" />
       </div>
     );
   }
@@ -452,9 +453,9 @@ function InstallerAssignmentPanel({
 
   return (
     <section className="card p-6">
-      <h2 className="text-base font-semibold">Assigned installer</h2>
+      <h2 className="text-base font-semibold">Assigned receiver</h2>
       <p className="mt-1 text-xs text-[color:var(--text-muted)]">
-        When set, only that installer can verify in the app (scans with the
+        When set, only that receiver can verify in the app (scans with the
         printed sticker QR are unchanged).
       </p>
       <form
@@ -463,14 +464,14 @@ function InstallerAssignmentPanel({
       >
         <label className="block flex-1">
           <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
-            Installer
+            Receiver
           </span>
           <select
             className="input w-full"
             value={value}
             onChange={(e) => setValue(e.target.value)}
           >
-            <option value="">— Anyone with installer login —</option>
+            <option value="">— Any receiver account —</option>
             {installers.map((u) => (
               <option key={u.id} value={u.id}>
                 {u.name} ({u.email})

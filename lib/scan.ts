@@ -87,13 +87,15 @@ export function computeProgress(
 export function resolveLogisticsScan(
   input: LogisticsScanComputationInput,
 ): ScanComputationResult {
-  const { barcode, items, orderStatus } = input;
-  const match = items.find((i) => i.barcode === barcode);
+  const { barcode, items } = input;
+  const normalized = barcode.trim().toUpperCase();
+  const match = items.find((i) => i.barcode.toUpperCase() === normalized);
 
   if (!match) {
     return {
       outcome: { result: "invalid", barcode },
-      nextStatus: orderStatus === "fulfilled" ? orderStatus : "anomaly",
+      /** Wrong warehouse code must not mark the gate shipment as anomaly. */
+      nextStatus: undefined,
     };
   }
 

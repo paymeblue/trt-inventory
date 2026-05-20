@@ -4,6 +4,7 @@ import Link from "next/link";
 import useSWR from "@/lib/swr";
 import { StatusPill } from "@/components/status-pill";
 import type { OrderStatus } from "@/db/schema";
+import { PageLoading } from "@/components/page-loading";
 
 interface OrdersResponse {
   orders: {
@@ -34,7 +35,7 @@ export default function ScanLandingPage() {
       </div>
 
       {isLoading ? (
-        <div className="text-sm text-[color:var(--text-muted)]">Loading…</div>
+        <PageLoading message="Loading deliveries…" />
       ) : scannable.length === 0 ? (
         <div className="card p-10 text-center text-sm text-[color:var(--text-muted)]">
           No deliveries awaiting verification. Ask the PM to create one.

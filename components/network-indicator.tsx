@@ -1,39 +1,35 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
+import { useNetworkState } from "@uidotdev/usehooks";
 
-/** 0 = offline … 4 = excellent (computed from Network Information API when available). */
+/** 0 = offline … 4 = excellent */
 type SignalBars = 0 | 1 | 2 | 3 | 4;
 
-function computeBars(): { bars: SignalBars; caption: string } {
-  if (typeof navigator !== "undefined" && !navigator.onLine) {
+function barsFromNetwork(network: ReturnType<typeof useNetworkState>): {
+  bars: SignalBars;
+  caption: string;
+} {
+  if (!network.online) {
     return { bars: 0, caption: "No network connection" };
   }
 
-  const nav = navigator as Navigator & {
-    connection?: {
-      effectiveType?: string;
-      downlink?: number;
-      rtt?: number;
-      saveData?: boolean;
-    };
-  };
-  const c = nav.connection;
-  const et = c?.effectiveType ?? "";
-  const down =
-    typeof c?.downlink === "number" && Number.isFinite(c.downlink)
-      ? c.downlink
-      : null;
-  const rtt =
-    typeof c?.rtt === "number" && Number.isFinite(c.rtt) ? c.rtt : null;
-
-  if (c?.saveData) {
+  if (network.saveData) {
     return { bars: 1, caption: "Data saver on — connection may be limited" };
   }
 
+  const et = network.effectiveType ?? "";
+  const down =
+    typeof network.downlink === "number" && Number.isFinite(network.downlink)
+      ? network.downlink
+      : null;
+  const rtt =
+    typeof network.rtt === "number" && Number.isFinite(network.rtt)
+      ? network.rtt
+      : null;
+
   let score = 3;
-  if (et === "slow-2g") score = 1;
-  else if (et === "2g") score = 1;
+  if (et === "slow-2g" || et === "2g") score = 1;
   else if (et === "3g") score = 2;
   else if (et === "4g") score = 4;
 
@@ -62,7 +58,8 @@ function computeBars(): { bars: SignalBars; caption: string } {
           ? "Fair connection"
           : "Weak connection";
 
-  return { bars, caption };
+  const typeHint = network.type ? ` (${network.type})` : "";
+  return { bars, caption: `${caption}${typeHint}` };
 }
 
 function barActive(bars: SignalBars, index: number): boolean {
@@ -71,39 +68,23 @@ function barActive(bars: SignalBars, index: number): boolean {
 }
 
 export function NetworkIndicator() {
-  const [bars, setBars] = useState<SignalBars>(3);
-  const [caption, setCaption] = useState("Checking connection…");
-
-  useEffect(() => {
-    const nav = navigator as Navigator & {
-      connection?: {
-        addEventListener?(type: string, fn: () => void): void;
-        removeEventListener?(type: string, fn: () => void): void;
-      };
-    };
-
-    function sync() {
-      const next = computeBars();
-      setBars(next.bars);
-      setCaption(next.caption);
-    }
-
-    sync();
-    window.addEventListener("online", sync);
-    window.addEventListener("offline", sync);
-    const nc = nav.connection;
-    nc?.addEventListener?.("change", sync);
-    return () => {
-      window.removeEventListener("online", sync);
-      window.removeEventListener("offline", sync);
-      nc?.removeEventListener?.("change", sync);
-    };
-  }, []);
+  const network = useNetworkState();
+  const { bars, caption } = useMemo(
+    () => barsFromNetwork(network),
+    [
+      network.online,
+      network.saveData,
+      network.effectiveType,
+      network.downlink,
+      network.rtt,
+      network.type,
+    ],
+  );
 
   const label = useMemo(() => {
     if (bars === 0) return "Offline";
     if (bars === 1) return "Weak";
-    if (bars === 2) return "Fair";
+    if (bars === 2) return "Poor";
     if (bars === 3) return "Good";
     return "Strong";
   }, [bars]);

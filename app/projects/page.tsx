@@ -9,6 +9,11 @@ import {
   AddressPicker,
   type SiteSelection,
 } from "@/components/address-picker";
+import {
+  NewProjectCreateInventory,
+  type NewProjectInventoryDraft,
+} from "@/components/new-project-create-inventory";
+import { useToast } from "@/components/toast";
 import { useAuthedUser } from "@/components/session-context";
 import type { ProjectApprovalStatus } from "@/db/schema";
 
@@ -27,12 +32,6 @@ interface ProjectRow {
 
 interface ProjectsResponse {
   projects: ProjectRow[];
-}
-
-interface DraftCategory {
-  id: string;
-  name: string;
-  quantity: string;
 }
 
 /**
@@ -263,6 +262,13 @@ function Stat({
   );
 }
 
+const emptyInventoryDraft: NewProjectInventoryDraft = {
+  categories: [],
+  lines: [],
+  payload: { categoryDefinitions: [], inventory: [] },
+  totalUnits: 0,
+};
+
 function NewProjectForm({
   onDone,
   onCancel,
@@ -271,62 +277,55 @@ function NewProjectForm({
   onCancel: () => void;
 }) {
   const user = useAuthedUser();
+  const { showToast } = useToast();
+  const [step, setStep] = useState<"compose" | "review">("compose");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [site, setSite] = useState<SiteSelection | null>(null);
-  const [categories, setCategories] = useState<DraftCategory[]>([
-    { id: crypto.randomUUID(), name: "", quantity: "1" },
-  ]);
+  const [inventoryDraft, setInventoryDraft] =
+    useState<NewProjectInventoryDraft>(emptyInventoryDraft);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function updateCategory(id: string, patch: Partial<DraftCategory>) {
-    setCategories((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, ...patch } : c)),
-    );
+  const siteRequired = user?.role === "pm";
+
+  function validateCompose(): string | null {
+    if (!name.trim()) return "Enter a project name.";
+    if (siteRequired && !site) {
+      return "Pick a site address from the Google suggestions.";
+    }
+    return null;
   }
 
-  function addCategory() {
-    setCategories((prev) => [
-      ...prev,
-      { id: crypto.randomUUID(), name: "", quantity: "1" },
-    ]);
+  function goToReview() {
+    const msg = validateCompose();
+    if (msg) {
+      setError(msg);
+      return;
+    }
+    setError(null);
+    setStep("review");
   }
 
-  function removeCategory(id: string) {
-    setCategories((prev) =>
-      prev.length > 1 ? prev.filter((c) => c.id !== id) : prev,
-    );
-  }
+  async function submitForReview() {
+    const msg = validateCompose();
+    if (msg) {
+      setError(msg);
+      setStep("compose");
+      return;
+    }
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      if (user?.role === "pm" && !site) {
-        setError("Confirm the project site address before creating.");
-        setBusy(false);
-        return;
-      }
-
-      const cleanCategories = categories
-        .map((c) => ({
-          name: c.name.trim(),
-          quantity: Math.max(
-            1,
-            Number.parseInt(c.quantity || "1", 10) || 1,
-          ),
-        }))
-        .filter((c) => c.name);
-
       const res = await fetch("/api/projects", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           name: name.trim(),
           description: description.trim() || undefined,
-          categories: cleanCategories,
+          categoryDefinitions: inventoryDraft.payload.categoryDefinitions,
+          inventory: inventoryDraft.payload.inventory,
           ...(site
             ? {
                 siteAddress: site.siteAddress,
@@ -336,8 +335,13 @@ function NewProjectForm({
             : {}),
         }),
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Failed to create project");
+      const json = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        project?: { approvalStatus?: string };
+      };
+      if (!res.ok) throw new Error(json.error ?? "Failed to submit project");
+
+      showToast("Project in review — waiting for super-admin approval.");
       await onDone();
     } catch (err) {
       setError((err as Error).message);
@@ -346,124 +350,233 @@ function NewProjectForm({
     }
   }
 
+  const namedCategories = inventoryDraft.categories.filter(
+    (c) => c.name.trim().length > 0,
+  );
+
   return (
     <section className="card p-6">
-      <h2 className="text-base font-semibold">New project</h2>
-      <p className="text-xs text-[color:var(--text-muted)]">
-        Set the project title, site address, and categories (each category
-        creates physical units with their own QR). Super-admin approves before
-        logistics activates the project.
-      </p>
-      <form onSubmit={onSubmit} className="mt-4 space-y-4">
-        <label className="block">
-          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
-            Project name
-          </span>
-          <input
-            required
-            autoFocus
-            maxLength={120}
-            className="input"
-            placeholder="e.g. Lekki Phase 2 – Block C"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
-            Description (optional)
-          </span>
-          <textarea
-            className="input"
-            rows={2}
-            maxLength={500}
-            placeholder="Short note so the team knows what this project is about."
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-          />
-        </label>
-
-        <AddressPicker
-          value={site}
-          onChange={setSite}
-          required={user?.role === "pm"}
-        />
-
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
-              Categories
+          <h2 className="text-base font-semibold">New project</h2>
+          <p className="mt-1 text-xs text-[color:var(--text-muted)]">
+            {step === "compose"
+              ? "Add details, categories, and items. Super-admin reviews before the project goes live."
+              : "Check everything below, then submit for super-admin review."}
+          </p>
+        </div>
+        <span className="rounded-full border border-[color:var(--border)] bg-[color:var(--surface-muted)] px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
+          Step {step === "compose" ? "1" : "2"} of 2
+        </span>
+      </div>
+
+      {step === "compose" ? (
+        <div className="mt-6 space-y-6">
+          <label className="block">
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
+              Project name
             </span>
-            <button
-              type="button"
-              onClick={addCategory}
-              className="btn btn-ghost text-xs"
-            >
-              + Add category
-            </button>
-          </div>
-          <div className="space-y-2">
-            {categories.map((c) => (
-              <div
-                key={c.id}
-                className="grid gap-2 md:grid-cols-[2fr_7rem_auto]"
-              >
-                <input
-                  className="input"
-                  placeholder="Category name (e.g. Upper unit)"
-                  value={c.name}
-                  onChange={(e) =>
-                    updateCategory(c.id, { name: e.target.value })
-                  }
-                />
-                <input
-                  type="number"
-                  min={1}
-                  className="input text-right"
-                  placeholder="Units"
-                  value={c.quantity}
-                  onChange={(e) =>
-                    updateCategory(c.id, { quantity: e.target.value })
-                  }
-                />
-                <button
-                  type="button"
-                  onClick={() => removeCategory(c.id)}
-                  disabled={categories.length === 1}
-                  className="btn btn-ghost text-xs"
-                  aria-label="Remove category"
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
+            <input
+              required
+              autoFocus
+              maxLength={120}
+              className="input"
+              placeholder="e.g. Lekki Phase 2 – Block C"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
+              Description (optional)
+            </span>
+            <textarea
+              className="input"
+              rows={2}
+              maxLength={500}
+              placeholder="Short note so the team knows what this project is about."
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </label>
+
+          <AddressPicker
+            value={site}
+            onChange={setSite}
+            required={siteRequired}
+          />
+
+          <div className="border-t border-[color:var(--border)] pt-6">
+            <NewProjectCreateInventory onDraftChange={setInventoryDraft} />
           </div>
         </div>
-
-        {error && (
-          <div className="rounded-lg border border-[color:var(--danger)] bg-red-50 px-3 py-2 text-sm text-[color:var(--danger)]">
-            {error}
+      ) : (
+        <div className="mt-6 space-y-6">
+          <div className="overflow-hidden rounded-lg border border-[color:var(--border)]">
+            <table className="w-full text-sm">
+              <tbody className="divide-y divide-[color:var(--border)]">
+                <tr className="bg-[color:var(--surface-muted)]/50">
+                  <th className="w-36 px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
+                    Project
+                  </th>
+                  <td className="px-4 py-2.5 font-medium">{name.trim()}</td>
+                </tr>
+                {description.trim() ? (
+                  <tr>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
+                      Description
+                    </th>
+                    <td className="px-4 py-2.5 text-[color:var(--text-muted)]">
+                      {description.trim()}
+                    </td>
+                  </tr>
+                ) : null}
+                <tr>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
+                    Site
+                  </th>
+                  <td className="px-4 py-2.5">
+                    {site ? (
+                      <span>
+                        {site.siteAddress}
+                        <span className="ml-2 font-mono text-[10px] text-[color:var(--text-muted)]">
+                          ({site.siteLatitude.toFixed(5)},{" "}
+                          {site.siteLongitude.toFixed(5)})
+                        </span>
+                      </span>
+                    ) : (
+                      <span className="text-[color:var(--text-muted)]">—</span>
+                    )}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
-        )}
 
-        <div className="flex items-center justify-end gap-2">
+          {namedCategories.length > 0 ? (
+            <div className="space-y-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
+                Categories ({namedCategories.length})
+              </h3>
+              <div className="overflow-hidden rounded-lg border border-[color:var(--border)]">
+                <table className="w-full text-sm">
+                  <thead className="bg-[color:var(--surface-muted)] text-xs uppercase tracking-wide text-[color:var(--text-muted)]">
+                    <tr>
+                      <th className="px-4 py-2 text-left">Name</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[color:var(--border)]">
+                    {namedCategories.map((c) => (
+                      <tr key={c.localId}>
+                        <td className="px-4 py-2 font-medium">{c.name}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="space-y-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
+              Items ({inventoryDraft.lines.length} lines ·{" "}
+              {inventoryDraft.totalUnits} units)
+            </h3>
+            <div className="overflow-hidden rounded-lg border border-[color:var(--border)]">
+              <table className="w-full text-sm">
+                <thead className="bg-[color:var(--surface-muted)] text-xs uppercase tracking-wide text-[color:var(--text-muted)]">
+                  <tr>
+                    <th className="px-4 py-2.5 text-left">Label</th>
+                    <th className="px-4 py-2.5 text-left">Type</th>
+                    <th className="px-4 py-2.5 text-right">Units</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[color:var(--border)]">
+                  {inventoryDraft.lines.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={3}
+                        className="px-4 py-6 text-center text-xs text-[color:var(--text-muted)]"
+                      >
+                        No items queued — you can still submit; add stock later
+                        on the project page after approval.
+                      </td>
+                    </tr>
+                  ) : (
+                    inventoryDraft.lines.map((l) => (
+                      <tr key={l.id}>
+                        <td className="px-4 py-2.5 font-medium">
+                          {l.kind === "category" ? l.label : l.name}
+                        </td>
+                        <td className="px-4 py-2.5 capitalize text-[color:var(--text-muted)]">
+                          {l.kind}
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-mono">
+                          {l.quantity}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <p className="rounded-lg border border-amber-500/30 bg-amber-50 px-3 py-2 text-xs text-amber-950 dark:bg-amber-950/40 dark:text-amber-100">
+            Submitting sends this project to the super-admin queue. It is not
+            active for installers or logistics until approved.
+          </p>
+        </div>
+      )}
+
+      {error ? (
+        <div className="mt-4 rounded-lg border border-[color:var(--danger)] bg-red-50 px-3 py-2 text-sm text-[color:var(--danger)] dark:bg-red-950/30">
+          {error}
+        </div>
+      ) : null}
+
+      <div className="mt-6 flex flex-wrap items-center justify-end gap-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={busy}
+          className="btn btn-ghost"
+        >
+          Cancel
+        </button>
+        {step === "compose" ? (
           <button
             type="button"
-            onClick={onCancel}
-            disabled={busy}
-            className="btn btn-ghost"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={busy || name.trim().length === 0}
+            disabled={busy || !name.trim()}
             className="btn btn-primary"
+            onClick={goToReview}
           >
-            {busy ? "Creating…" : "Create project"}
+            Move to review →
           </button>
-        </div>
-      </form>
+        ) : (
+          <>
+            <button
+              type="button"
+              disabled={busy}
+              className="btn btn-ghost"
+              onClick={() => {
+                setError(null);
+                setStep("compose");
+              }}
+            >
+              ← Back to edit
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              className="btn btn-primary"
+              onClick={() => void submitForReview()}
+            >
+              {busy ? "Submitting…" : "Submit for review"}
+            </button>
+          </>
+        )}
+      </div>
     </section>
   );
 }

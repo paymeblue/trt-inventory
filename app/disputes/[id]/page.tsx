@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/fetch-json";
 import { useAuthedUser } from "@/components/session-context";
+import { PageLoading } from "@/components/page-loading";
 
 interface DisputePayload {
   id: string;
@@ -125,7 +126,7 @@ export default function DisputeDetailPage() {
             ) : null}
           </>
         ) : threadQuery.isPending ? (
-          <p className="mt-4 text-sm text-[color:var(--text-muted)]">Loading…</p>
+          <PageLoading message="Loading thread…" centered={false} className="mt-4" />
         ) : threadQuery.isError ? (
           <div className="mt-4 text-sm text-[color:var(--danger)]">
             {(threadQuery.error as Error).message}{" "}

@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/fetch-json";
 import { invalidateAllApprovalSurface, queryKeys } from "@/lib/query-keys";
 import { useAuthedUser } from "@/components/session-context";
+import { PageLoading } from "@/components/page-loading";
 
 interface QueueRow {
   id: string;
@@ -34,7 +35,7 @@ export default function LogisticsApprovalsPage() {
       fetchJson<{ projects: QueueRow[] }>(
         "/api/approvals/projects?queue=logistics",
       ),
-    enabled: user?.role === "logistics",
+    enabled: user?.role === "logistics" || user?.role === "super_admin",
   });
 
   const metaQuery = useQuery({
@@ -43,7 +44,7 @@ export default function LogisticsApprovalsPage() {
       fetchJson<{ projects: LogisticsMetaRow[] }>(
         "/api/approvals/projects?queue=logistics_metadata",
       ),
-    enabled: user?.role === "logistics",
+    enabled: user?.role === "logistics" || user?.role === "super_admin",
   });
 
   const rejectMut = useMutation({
@@ -77,12 +78,12 @@ export default function LogisticsApprovalsPage() {
   });
 
   if (!user) return null;
-  if (user.role !== "logistics") {
+  if (user.role !== "logistics" && user.role !== "super_admin") {
     return (
       <div className="card p-6">
-        <h1 className="text-lg font-semibold">Logistics only</h1>
+        <h1 className="text-lg font-semibold">Awaiting logistics</h1>
         <p className="text-sm text-[color:var(--text-muted)]">
-          This queue is for logistics accounts only.
+          This queue is for logistics or super-admin accounts.
         </p>
       </div>
     );
@@ -101,8 +102,9 @@ export default function LogisticsApprovalsPage() {
       <div>
         <h1 className="text-2xl font-semibold">Awaiting logistics</h1>
         <p className="text-sm text-[color:var(--text-muted)]">
-          Open each job and scan every packing QR before activating. Installers
-          reuse those same codes on site; stock updates only after their scans.
+          This is the critical warehouse step: scan every packing QR here before
+          activating. Receivers reuse the same stickers on site only after you
+          finish this list.
         </p>
       </div>
 
@@ -116,7 +118,7 @@ export default function LogisticsApprovalsPage() {
       )}
 
       {isPending ? (
-        <p className="text-sm text-[color:var(--text-muted)]">Loading…</p>
+        <PageLoading message="Loading logistics queue…" />
       ) : rows.length === 0 ? (
         <p className="text-sm text-[color:var(--text-muted)]">Nothing waiting.</p>
       ) : (
@@ -175,7 +177,7 @@ export default function LogisticsApprovalsPage() {
           </p>
         ) : null}
         {metaQuery.isPending ? (
-          <p className="mt-4 text-sm text-[color:var(--text-muted)]">Loading…</p>
+          <PageLoading message="Loading metadata queue…" centered={false} className="mt-4" />
         ) : metaRows.length === 0 ? (
           <p className="mt-4 text-sm text-[color:var(--text-muted)]">
             No pending updates.

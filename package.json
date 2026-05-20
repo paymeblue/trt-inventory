@@ -19,6 +19,7 @@
     "@excalidraw/excalidraw": "^0.18.1",
     "@heroicons/react": "^2.2.0",
     "@tanstack/react-query": "^5.100.10",
+    "@uidotdev/usehooks": "^2.4.1",
     "@zxing/browser": "^0.1.5",
     "@zxing/library": "^0.21.3",
     "clsx": "^2.1.1",
@@ -30,10 +31,12 @@
     "qrcode": "^1.5.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "react-google-autocomplete": "^2.7.5",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/google.maps": "^3.64.1",
     "@types/jsbarcode": "^3.11.4",
     "@types/node": "^20",
     "@types/qrcode": "^1.5.6",

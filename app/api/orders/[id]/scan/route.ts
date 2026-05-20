@@ -54,14 +54,20 @@ async function handlePost(
     if (result.kind === "installer_not_assigned") {
       return jsonError(
         403,
-        "Only the installer assigned to this project may verify with this login. Use the sticker QR on the box, or ask your PM to assign you.",
+        "Only the receiver assigned to this project may verify with this login. Use the sticker QR on the box, or ask your PM to assign you.",
       );
     }
 
     if (result.kind === "logistics_not_verified") {
       return jsonError(
         403,
-        `Logistics must scan this item at the warehouse first (SKU ${result.sku}). Open the project's logistics scanning page.`,
+        `Warehouse verification required for SKU ${result.sku}. Logistics must scan this packing QR in Warehouse scan (Awaiting logistics) before receivers verify on site.`,
+      );
+    }
+    if (result.kind === "site_not_configured") {
+      return jsonError(
+        403,
+        "This project has no site address yet. Ask your PM to set the project site before on-site scans.",
       );
     }
     if (result.kind === "geofence_location_required") {

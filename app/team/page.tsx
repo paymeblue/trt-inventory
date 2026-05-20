@@ -11,6 +11,7 @@ interface TeamMember {
   id: string;
   email: string;
   name: string;
+  phone: string | null;
   role: Role;
   createdAt: string;
   passwordResetRequestedAt: string | null;
@@ -79,9 +80,9 @@ export default function TeamPage() {
       <div>
         <h1 className="text-2xl font-semibold">Team</h1>
         <p className="text-sm text-[color:var(--text-muted)]">
-          Create installer accounts and share the credentials directly. Each
-          installer signs in with their own email + password and their scans
-          are logged to their name.
+          Create receiver accounts and share credentials directly. Each receiver
+          signs in with their own email + password; on-site scans are logged to
+          their name.
         </p>
       </div>
 
@@ -177,6 +178,7 @@ export default function TeamPage() {
             <tr>
               <th className="px-6 py-3 text-left">Name</th>
               <th className="px-6 py-3 text-left">Email</th>
+              <th className="px-6 py-3 text-left">Phone</th>
               <th className="px-6 py-3 text-left">Role</th>
               <th className="px-6 py-3 text-left">Created</th>
               <th className="px-6 py-3">
@@ -196,6 +198,9 @@ export default function TeamPage() {
                   )}
                 </td>
                 <td className="px-6 py-3 font-mono text-xs">{u.email}</td>
+                <td className="px-6 py-3 text-xs text-[color:var(--text-muted)]">
+                  {u.phone ?? "—"}
+                </td>
                 <td className="px-6 py-3">
                   <span
                     className={clsx("pill", rolePillModifier(u.role))}
@@ -262,6 +267,7 @@ function InviteForm({
 }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<Role>("installer");
   const [busy, setBusy] = useState(false);
@@ -280,13 +286,20 @@ function InviteForm({
       const res = await fetch("/api/users", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name, email, password, role }),
+        body: JSON.stringify({
+          name,
+          email,
+          phone: phone.trim() || undefined,
+          password,
+          role,
+        }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Failed to create user");
       setCreated({ email, password, name });
       setName("");
       setEmail("");
+      setPhone("");
       setPassword("");
       setRole("installer");
       await onCreated();
@@ -313,7 +326,20 @@ function InviteForm({
             className="input"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Ada Installer"
+            placeholder="e.g. Ada Okonkwo"
+          />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
+            Phone (optional)
+          </span>
+          <input
+            type="tel"
+            className="input"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="+234 …"
+            autoComplete="tel"
           />
         </label>
         <label className="block">
@@ -350,7 +376,7 @@ function InviteForm({
             value={role}
             onChange={(e) => setRole(e.target.value as Role)}
           >
-            <option value="installer">Installer (scans deliveries)</option>
+            <option value="installer">Receiver (on-site delivery verification)</option>
             <option value="pm">Project Manager (full access)</option>
             {viewerRole === "super_admin" ? (
               <option value="logistics">

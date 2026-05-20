@@ -1,27 +1,21 @@
 import { jsonError } from "@/lib/api";
-
-export type GeocodeResult = {
-  formattedAddress: string;
-  latitude: number;
-  longitude: number;
-};
+import type { GeocodeResult } from "@/lib/geocode-types";
 
 /**
  * Geocode a free-text address with Google Geocoding API (server-side).
- * Requires `GOOGLE_MAPS_API_KEY` in the environment.
+ * Returns null when key missing or no match (caller may fall back to Nominatim).
  */
 export async function geocodeAddress(
   address: string,
-): Promise<GeocodeResult | { error: ReturnType<typeof jsonError> }> {
-  const key = process.env.GOOGLE_MAPS_API_KEY?.trim();
-  if (!key) {
-    return {
-      error: jsonError(
-        503,
-        "Geocoding is not configured. Set GOOGLE_MAPS_API_KEY on the server.",
-      ),
-    };
-  }
+): Promise<
+  | Omit<GeocodeResult, "provider">
+  | { error: ReturnType<typeof jsonError> }
+  | null
+> {
+  const key =
+    process.env.GOOGLE_MAPS_API_KEY?.trim() ||
+    process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim();
+  if (!key) return null;
 
   const q = address.trim();
   if (!q) {

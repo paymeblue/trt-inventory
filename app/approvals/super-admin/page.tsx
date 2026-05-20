@@ -8,6 +8,8 @@ import { packingLineCountForStock } from "@/lib/packing-lines";
 import { formatPendingPatchSummary } from "@/lib/project-pending-patch";
 import { invalidateAllApprovalSurface, queryKeys } from "@/lib/query-keys";
 import { useAuthedUser } from "@/components/session-context";
+import { PageLoading } from "@/components/page-loading";
+import { QrCodeLoader } from "@/components/qr-code-loader";
 
 interface QueueRow {
   id: string;
@@ -134,7 +136,17 @@ export default function SuperAdminApprovalsPage() {
             aria-live="polite"
             aria-busy
           >
-            <div className="h-16 w-16 animate-spin rounded-full border-4 border-white border-t-transparent" />
+            <QrCodeLoader
+              size={160}
+              label="Approval in progress"
+              theme={{
+                bg: "#0d1b2a",
+                border: "#1b263b",
+                block: "#00b4d8",
+                blockMid: "#90e0ef",
+                laser: "#ff7043",
+              }}
+            />
             <p className="mt-8 text-xl font-semibold text-white">
               Approval in progress
             </p>
@@ -163,7 +175,7 @@ export default function SuperAdminApprovalsPage() {
       )}
 
       {isPending ? (
-        <p className="text-sm text-[color:var(--text-muted)]">Loading…</p>
+        <PageLoading message="Loading pending projects…" />
       ) : rows.length === 0 ? (
         <p className="text-sm text-[color:var(--text-muted)]">Nothing waiting.</p>
       ) : (
@@ -224,7 +236,7 @@ export default function SuperAdminApprovalsPage() {
           </div>
         )}
         {metaQuery.isPending ? (
-          <p className="mt-4 text-sm text-[color:var(--text-muted)]">Loading…</p>
+          <PageLoading message="Loading metadata updates…" centered={false} className="mt-4" />
         ) : metaRows.length === 0 ? (
           <p className="mt-4 text-sm text-[color:var(--text-muted)]">
             No queued metadata approvals.
@@ -332,9 +344,11 @@ export default function SuperAdminApprovalsPage() {
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
               {approvePreviewQuery.isPending ? (
-                <p className="text-sm text-[color:var(--text-muted)]">
-                  Loading project items…
-                </p>
+                <PageLoading
+                  message="Loading project items…"
+                  centered={false}
+                  loader={{ size: 96 }}
+                />
               ) : approvePreviewQuery.isError ? (
                 <p className="text-sm text-[color:var(--danger)]">
                   Could not load project items.

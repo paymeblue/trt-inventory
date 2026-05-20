@@ -51,7 +51,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ projects: rows });
     }
     if (q === "logistics") {
-      const auth = await requireUserAny(["logistics"]);
+      const auth = await requireUserAny(["logistics", "super_admin"]);
       if ("error" in auth) return auth.error;
       const rows = await db
         .select({
@@ -67,7 +67,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ projects: rows });
     }
     if (q === "logistics_metadata") {
-      const auth = await requireUserAny(["logistics"]);
+      const auth = await requireUserAny(["logistics", "super_admin"]);
       if ("error" in auth) return auth.error;
       const rows = await db
         .select({

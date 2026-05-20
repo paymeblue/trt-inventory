@@ -5,6 +5,8 @@ import { getCurrentUser, type AuthenticatedActor } from '@/lib/auth-guard';
 import { getPrintedScanActor } from '@/lib/printed-scan-actor';
 import { verifyPrintedScanToken } from '@/lib/printed-scan-token';
 import { runPageWithObservability } from '@/lib/observability/instrument';
+import { findLogisticsGateOrderId } from '@/lib/logistics-gate-order';
+import { executeLogisticsScan } from '@/lib/logistics-scan-execute';
 import { executeScan, findOrderByBarcode } from '@/lib/scan-execute';
 import type { ScanOutcome } from '@/lib/scan';
 
@@ -75,15 +77,44 @@ async function scanDeepLinkInner(
 
   if (!actor) {
     const sessionActor = await getCurrentUser();
+    if (sessionActor?.role === 'logistics') {
+      const early = await findOrderByBarcode(barcode);
+      if (early) {
+        redirect(
+          `/projects/${early.projectId}/logistics-scan?scan=${encodeURIComponent(barcode)}`,
+        );
+      }
+    }
     if (sessionActor && sessionActor.role === 'installer') {
       actor = sessionActor;
-    } else if (sessionActor && sessionActor.role !== 'installer') {
-      // Signed-in PM hit a token-less URL: don't pretend it worked.
+    } else if (sessionActor && sessionActor.role === 'pm') {
       return (
         <OutcomeShell
           status="blocked"
-          title="Scans are installer-only"
-          body="Your account is a Project Manager. Only installer accounts can acknowledge deliveries. Ask your PM to log in as the installer that owns this route."
+          title="On-site scans are receiver-only"
+          body="Project Manager accounts cannot verify deliveries. Ask your PM to assign a receiver for this route, or scan with the printed QR as the receiver."
+        />
+      );
+    } else if (sessionActor && sessionActor.role === 'super_admin') {
+      const early = await findOrderByBarcode(barcode);
+      if (early?.projectApprovalStatus === 'pending_logistics') {
+        redirect(
+          `/projects/${early.projectId}/logistics-scan?scan=${encodeURIComponent(barcode)}`,
+        );
+      }
+      return (
+        <OutcomeShell
+          status="blocked"
+          title="Use the right workflow"
+          body="Super admins approve projects in Pending approval (SA). For warehouse scans while a project awaits logistics, open Awaiting logistics → Warehouse scan. Receivers verify on site after activation."
+        />
+      );
+    } else if (sessionActor) {
+      return (
+        <OutcomeShell
+          status="blocked"
+          title="Wrong account for this scan"
+          body="This QR is for warehouse verification (logistics) or on-site delivery verification (receiver). Open Awaiting logistics for warehouse scans."
         />
       );
     } else {
@@ -119,15 +150,79 @@ async function scanDeepLinkInner(
     );
   }
 
+  const orderHref = isAnonymousPhoneScan
+    ? undefined
+    : `/orders/${lookup.orderId}`;
+
+  if (lookup.projectApprovalStatus === 'pending_logistics') {
+    const gateOrderId = await findLogisticsGateOrderId(lookup.projectId);
+    if (!gateOrderId) {
+      return (
+        <OutcomeShell
+          status="blocked"
+          title="Warehouse list not ready"
+          body="This project has no logistics gate shipment yet. Ask super-admin to approve the project again or refresh the logistics queue."
+          hideNavigation={hideNavigation}
+        />
+      );
+    }
+
+    const logisticsResult = await executeLogisticsScan({
+      orderId: gateOrderId,
+      barcode,
+      actor,
+    });
+
+    if (logisticsResult.kind === 'wrong_project_status') {
+      return (
+        <OutcomeShell
+          status="blocked"
+          title="Not awaiting warehouse scans"
+          body="This project is no longer in the logistics verification step."
+          hideNavigation={hideNavigation}
+        />
+      );
+    }
+    if (logisticsResult.kind !== 'ok') {
+      return (
+        <OutcomeShell
+          status="blocked"
+          title="Warehouse scan failed"
+          body="Could not record this packing QR. Open Warehouse scan from the Awaiting logistics queue and try again."
+          hideNavigation={hideNavigation}
+        />
+      );
+    }
+
+    const wh = logisticsResult.outcome;
+    const whTitle =
+      wh.result === 'valid'
+        ? 'Warehouse line recorded'
+        : wh.result === 'duplicate'
+          ? 'Already scanned in warehouse'
+          : 'Unknown code for this shipment';
+    const whBody =
+      wh.result === 'valid'
+        ? `SKU ${logisticsResult.stock?.sku ?? '—'} verified in the warehouse. ${logisticsResult.progress.remaining} line(s) left before you can activate the project for receivers.`
+        : wh.result === 'duplicate'
+          ? 'This packing QR was already counted in the warehouse scan list.'
+          : 'This code is not on the logistics gate list for this project.';
+
+    return (
+      <OutcomeShell
+        status={wh.result === 'valid' ? 'ok' : 'blocked'}
+        title={whTitle}
+        body={whBody}
+        hideNavigation={hideNavigation}
+      />
+    );
+  }
+
   const result = await executeScan({
     orderId: lookup.orderId,
     barcode,
     actor,
   });
-
-  const orderHref = isAnonymousPhoneScan
-    ? undefined
-    : `/orders/${lookup.orderId}`;
 
   if (result.kind === 'order_not_found') {
     return (
@@ -177,8 +272,8 @@ async function scanDeepLinkInner(
     return (
       <OutcomeShell
         status="blocked"
-        title="Not the assigned installer"
-        body="This project is locked to a different installer for in-app scans. Use the printed QR on the box, or ask your PM to assign this route to you."
+        title="Not the assigned receiver"
+        body="This project is locked to a different receiver for in-app scans. Use the printed QR on the box, or ask your PM to assign this route to you."
         orderHref={orderHref}
         hideNavigation={hideNavigation}
       />
@@ -189,8 +284,20 @@ async function scanDeepLinkInner(
     return (
       <OutcomeShell
         status="blocked"
-        title="Warehouse scan required first"
-        body={`Logistics must scan this SKU in the warehouse before on-site verification (SKU ${result.sku}). Ask logistics to finish the warehouse scan list for this project.`}
+        title="Warehouse verification required"
+        body={`This packing QR must be scanned in the warehouse before on-site verification (SKU ${result.sku}). Logistics: open Warehouse scan from Awaiting logistics and scan every line. Receivers use the same sticker only after that.`}
+        hideNavigation={hideNavigation}
+      />
+    );
+  }
+
+  if (result.kind === 'site_not_configured') {
+    return (
+      <OutcomeShell
+        status="blocked"
+        title="Site address missing"
+        body="This project has no install site on file. Ask your PM to set the project site address before scanning on site."
+        orderHref={orderHref}
         hideNavigation={hideNavigation}
       />
     );
@@ -201,7 +308,7 @@ async function scanDeepLinkInner(
       <OutcomeShell
         status="blocked"
         title="Location required"
-        body="Open this order in the installer app and allow GPS when scanning at the project site."
+        body="Open this order in the receiver app and allow GPS when scanning at the project site."
         orderHref={orderHref}
         hideNavigation={hideNavigation}
       />

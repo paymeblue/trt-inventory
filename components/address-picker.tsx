@@ -1,6 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import Autocomplete from "react-google-autocomplete";
+
+import { googleMapsPublicApiKey } from "@/lib/google-maps-key";
 
 export type SiteSelection = {
   siteAddress: string;
@@ -16,7 +19,7 @@ type Props = {
 };
 
 /**
- * PM picks a project site: type an address, geocode via server, confirm coordinates.
+ * Project site address with Google Places autocomplete (client-side).
  */
 export function AddressPicker({
   value,
@@ -24,50 +27,107 @@ export function AddressPicker({
   required,
   disabled,
 }: Props) {
-  const [draft, setDraft] = useState(value?.siteAddress ?? "");
+  const apiKey = googleMapsPublicApiKey();
+  const [query, setQuery] = useState(value?.siteAddress ?? "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  async function resolveAddress() {
-    const address = draft.trim();
-    if (!address) {
-      setErr("Enter the project site address.");
+  useEffect(() => {
+    if (value?.siteAddress) setQuery(value.siteAddress);
+  }, [value?.siteAddress]);
+
+  function applyPlace(place: google.maps.places.PlaceResult) {
+    const lat = place.geometry?.location?.lat();
+    const lng = place.geometry?.location?.lng();
+    const addr =
+      place.formatted_address?.trim() ||
+      place.name?.trim() ||
+      query.trim();
+    if (
+      typeof lat !== "number" ||
+      typeof lng !== "number" ||
+      !Number.isFinite(lat) ||
+      !Number.isFinite(lng) ||
+      !addr
+    ) {
+      setErr("Pick a full street address from the Google suggestions.");
+      onChange(null);
+      return;
+    }
+    setErr(null);
+    onChange({
+      siteAddress: addr,
+      siteLatitude: lat,
+      siteLongitude: lng,
+    });
+    setQuery(addr);
+  }
+
+  async function useCurrentLocation() {
+    if (!navigator.geolocation) {
+      setErr("This device cannot read GPS location.");
       return;
     }
     setBusy(true);
     setErr(null);
-    try {
-      const res = await fetch("/api/geocode", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ address }),
-      });
-      const json = (await res.json().catch(() => ({}))) as {
-        error?: string;
-        formattedAddress?: string;
-        latitude?: number;
-        longitude?: number;
-      };
-      if (!res.ok) throw new Error(json.error ?? "Could not geocode address");
-      if (
-        typeof json.latitude !== "number" ||
-        typeof json.longitude !== "number" ||
-        !json.formattedAddress
-      ) {
-        throw new Error("Geocoder returned an incomplete result");
-      }
-      onChange({
-        siteAddress: json.formattedAddress,
-        siteLatitude: json.latitude,
-        siteLongitude: json.longitude,
-      });
-      setDraft(json.formattedAddress);
-    } catch (e) {
-      setErr((e as Error).message);
-      onChange(null);
-    } finally {
-      setBusy(false);
-    }
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          const res = await fetch("/api/geocode/reverse", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              latitude: pos.coords.latitude,
+              longitude: pos.coords.longitude,
+            }),
+          });
+          const json = (await res.json().catch(() => ({}))) as {
+            error?: string;
+            formattedAddress?: string;
+            latitude?: number;
+            longitude?: number;
+          };
+          if (!res.ok) throw new Error(json.error ?? "Reverse geocode failed");
+          if (
+            typeof json.latitude !== "number" ||
+            typeof json.longitude !== "number" ||
+            !json.formattedAddress
+          ) {
+            throw new Error("Could not resolve address from GPS");
+          }
+          onChange({
+            siteAddress: json.formattedAddress,
+            siteLatitude: json.latitude,
+            siteLongitude: json.longitude,
+          });
+          setQuery(json.formattedAddress);
+        } catch (e) {
+          setErr((e as Error).message);
+          onChange(null);
+        } finally {
+          setBusy(false);
+        }
+      },
+      (geoErr) => {
+        setBusy(false);
+        setErr(
+          geoErr.code === geoErr.PERMISSION_DENIED
+            ? "Allow location access to use GPS for the site address."
+            : "Could not read GPS. Pick an address from the list instead.",
+        );
+      },
+      { enableHighAccuracy: true, timeout: 12_000 },
+    );
+  }
+
+  if (!apiKey) {
+    return (
+      <div className="rounded-lg border border-[color:var(--danger)] bg-red-50 px-3 py-2 text-sm text-[color:var(--danger)] dark:bg-red-950/30">
+        Google Maps API key is not configured. Set{" "}
+        <code className="text-xs">GOOGLE_MAPS_API_KEY</code> (and enable Places
+        + Geocoding APIs) in <code className="text-xs">.env.local</code>.
+      </div>
+    );
   }
 
   return (
@@ -76,49 +136,57 @@ export function AddressPicker({
         <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
           Project site address{required ? " *" : ""}
         </span>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <input
-            className="input min-w-0 flex-1"
-            placeholder="e.g. Plot 12, Ademola Adetokunbo Crescent, Mabushi, Abuja"
-            value={draft}
+        <div className="relative">
+          <Autocomplete
+            apiKey={apiKey}
+            className="input w-full pr-28"
+            placeholder="Start typing — pick a Google suggestion"
+            value={query}
             disabled={disabled || busy}
             onChange={(e) => {
-              setDraft(e.target.value);
-              if (value) onChange(null);
+              const next = (e.target as HTMLInputElement).value;
+              setQuery(next);
+              onChange(null);
+              setErr(null);
             }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                void resolveAddress();
-              }
+            onPlaceSelected={(place) => applyPlace(place)}
+            options={{
+              types: ["geocode"],
+              fields: ["formatted_address", "geometry", "name"],
             }}
           />
           <button
             type="button"
-            className="btn btn-ghost shrink-0"
-            disabled={disabled || busy || !draft.trim()}
-            onClick={() => void resolveAddress()}
+            className="absolute right-1 top-1/2 -translate-y-1/2 btn btn-ghost px-2 py-1 text-[10px]"
+            disabled={disabled || busy}
+            onClick={() => void useCurrentLocation()}
+            title="Use GPS and look up address"
           >
-            {busy ? "Locating…" : "Confirm location"}
+            GPS
           </button>
         </div>
       </label>
       {value ? (
-        <p className="text-xs text-[color:var(--info)]">
-          Site locked: {value.siteAddress}
-          <span className="ml-1 font-mono text-[10px] text-[color:var(--text-muted)]">
-            ({value.siteLatitude.toFixed(5)}, {value.siteLongitude.toFixed(5)})
+        <div className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-full border border-emerald-600/25 bg-emerald-50 px-3 py-1.5 text-xs text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-950/50 dark:text-emerald-100">
+          <span
+            className="size-1.5 shrink-0 rounded-full bg-emerald-600"
+            aria-hidden
+          />
+          <span className="min-w-0 truncate font-medium">{value.siteAddress}</span>
+          <span className="shrink-0 font-mono text-[10px] opacity-80">
+            {value.siteLatitude.toFixed(5)}, {value.siteLongitude.toFixed(5)}
           </span>
-        </p>
+        </div>
       ) : (
         <p className="text-xs text-[color:var(--text-muted)]">
-          Confirm the address so installer scans can be checked against this site
-          (e.g. flag scans in Wuse for a Mabushi project).
+          Receiver on-site scans are only allowed at this address (GPS + geofence).
+          Choose a suggestion from the list — free typing alone is not enough.
         </p>
       )}
-      {err && (
-        <p className="text-xs text-[color:var(--danger)]">{err}</p>
-      )}
+      {busy ? (
+        <p className="text-xs text-[color:var(--text-muted)]">Looking up…</p>
+      ) : null}
+      {err ? <p className="text-xs text-[color:var(--danger)]">{err}</p> : null}
     </div>
   );
 }

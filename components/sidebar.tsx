@@ -90,7 +90,7 @@ const navMain: NavItem[] = [
     href: "/approvals/logistics",
     label: "Awaiting logistics",
     Icon: TruckIcon,
-    roles: ["logistics"],
+    roles: ["logistics", "super_admin"],
   },
 ];
 
@@ -163,6 +163,8 @@ export function Sidebar() {
               queueBadge = qc?.superAdminProjects;
             } else if (item.href === "/disputes") {
               queueBadge = qc?.superAdminDisputes;
+            } else if (item.href === "/approvals/logistics") {
+              queueBadge = qc?.logisticsProjects;
             }
           } else if (
             item.href === "/approvals/logistics" &&
@@ -266,7 +268,7 @@ export function Sidebar() {
           </p>
           <p className="mt-1.5">
             <strong className="text-[color:var(--text)]">Super admin:</strong>{" "}
-            approves new projects before they reach logistics and installers.
+            approves new projects before they reach logistics and receivers.
           </p>
         </section>
 

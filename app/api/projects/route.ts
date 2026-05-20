@@ -1,19 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { asc, count, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
-import {
-  orders,
-  products,
-  projectCategories,
-  projects,
-  stockMovements,
-} from "@/db/schema";
+import { orders, products, projects, stockMovements } from "@/db/schema";
 import { DEFAULT_GEOFENCE_RADIUS_M } from "@/lib/geofence";
-import {
-  insertPhysicalUnitsForProject,
-  loadProjectSkuSet,
-  newBatchId,
-} from "@/lib/project-items-create";
+import { applyCreateProjectInventory } from "@/lib/project-create-inventory";
 import { requireUser, requireUserAny } from "@/lib/auth-guard";
 import { handleError, jsonError } from "@/lib/api";
 import {
@@ -175,10 +165,7 @@ export async function POST(req: NextRequest) {
             name: body.name,
             description: body.description ?? null,
             createdById: auth.actor.userId,
-            approvalStatus:
-              auth.actor.role === "super_admin"
-                ? "active"
-                : "pending_super_admin",
+            approvalStatus: "pending_super_admin",
             ...(hasSite
               ? {
                   siteAddress: body.siteAddress!,
@@ -215,36 +202,15 @@ export async function POST(req: NextRequest) {
           await tx.insert(stockMovements).values(initialMoves);
         }
 
-        const categoryCreated: { id: string; name: string }[] = [];
-        if (body.categories.length > 0) {
-          let pool = await loadProjectSkuSet(tx, project.id);
-          for (const catInput of body.categories) {
-            const [cat] = await tx
-              .insert(projectCategories)
-              .values({
-                projectId: project.id,
-                name: catInput.name.trim(),
-              })
-              .returning();
-            categoryCreated.push({ id: cat.id, name: cat.name });
-            await insertPhysicalUnitsForProject(tx, {
-              projectId: project.id,
-              userId: auth.actor.userId,
-              quantity: catInput.quantity,
-              categoryId: cat.id,
-              batchId: newBatchId(),
-              skuLabelSource: cat.name,
-              displayNameForUnit: () => cat.name,
-              existingSkusLower: pool,
-            });
-            pool = await loadProjectSkuSet(tx, project.id);
-          }
-        }
+        await applyCreateProjectInventory(tx, {
+          projectId: project.id,
+          userId: auth.actor.userId,
+          body,
+        });
 
         return {
           project,
           items: insertedItems,
-          categories: categoryCreated,
         };
       });
     } catch (err) {

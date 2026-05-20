@@ -7,6 +7,7 @@ import { requireUserAny } from "@/lib/auth-guard";
 import { handleError, jsonError } from "@/lib/api";
 import { instrumentRouteHandler } from "@/lib/observability/instrument";
 import { executeLogisticsScan } from "@/lib/logistics-scan-execute";
+import { normalizeScanBarcode } from "@/lib/scan-deep-link";
 
 const bodySchema = z.object({
   barcode: z.string().trim().min(1),
@@ -17,12 +18,16 @@ async function handlePost(
   ctx?: { params: Promise<{ id: string }> },
 ) {
   if (!ctx) return jsonError(500, "Missing route context");
-  const auth = await requireUserAny(["logistics"]);
+  const auth = await requireUserAny(["logistics", "super_admin"]);
   if ("error" in auth) return auth.error;
 
   try {
     const { id: projectId } = await ctx.params;
-    const { barcode } = bodySchema.parse(await req.json());
+    const body = bodySchema.parse(await req.json());
+    const barcode = normalizeScanBarcode(body.barcode);
+    if (!barcode) {
+      return jsonError(400, "Enter a packing sticker barcode (TRT-…), not the project reference code.");
+    }
 
     const gateOrder = await db.query.orders.findFirst({
       where: and(

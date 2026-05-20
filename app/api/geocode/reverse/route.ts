@@ -2,14 +2,15 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth-guard";
 import { handleError, jsonError } from "@/lib/api";
-import { geocodeForward } from "@/lib/geocode-service";
+import { geocodeReverse } from "@/lib/geocode-service";
 
 const bodySchema = z.object({
-  address: z.string().trim().min(3).max(500),
+  latitude: z.number().finite().min(-90).max(90),
+  longitude: z.number().finite().min(-180).max(180),
 });
 
 /**
- * POST /api/geocode — resolve address → lat/lng (Google Geocoding API).
+ * POST /api/geocode/reverse — coordinates → address (Google Geocoding API).
  */
 export async function POST(req: NextRequest) {
   const auth = await requireUser();
@@ -17,12 +18,9 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = bodySchema.parse(await req.json());
-    const result = await geocodeForward(body.address);
+    const result = await geocodeReverse(body.latitude, body.longitude);
     if (!result) {
-      return jsonError(
-        400,
-        "No match for that address. Pick a suggestion or try a more specific location.",
-      );
+      return jsonError(404, "Could not resolve an address for those coordinates");
     }
     return NextResponse.json(result);
   } catch (err) {

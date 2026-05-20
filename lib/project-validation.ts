@@ -59,6 +59,24 @@ export const createProjectCategorySchema = z.object({
   quantity: z.coerce.number().int().min(1).max(500).default(1),
 });
 
+export const createProjectCategoryDefSchema = z.object({
+  localId: z.string().uuid(),
+  name: z.string().trim().min(1).max(120),
+});
+
+export const createProjectInventoryLineSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("category"),
+    categoryLocalId: z.string().uuid(),
+    quantity: z.coerce.number().int().min(1).max(500),
+  }),
+  z.object({
+    kind: z.literal("custom"),
+    name: z.string().trim().min(1).max(160),
+    quantity: z.coerce.number().int().min(1).max(500),
+  }),
+]);
+
 const siteFieldsSchema = z.object({
   siteAddress: z.string().trim().min(3).max(500),
   siteLatitude: z.number().finite().min(-90).max(90),
@@ -79,6 +97,16 @@ export const createProjectBodySchema = z
     categories: z
       .array(createProjectCategorySchema)
       .max(50, "At most 50 categories per request")
+      .nullish()
+      .transform((v) => v ?? []),
+    categoryDefinitions: z
+      .array(createProjectCategoryDefSchema)
+      .max(50)
+      .nullish()
+      .transform((v) => v ?? []),
+    inventory: z
+      .array(createProjectInventoryLineSchema)
+      .max(200)
       .nullish()
       .transform((v) => v ?? []),
     siteAddress: z.string().trim().min(3).max(500).optional(),

@@ -23,7 +23,7 @@ export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireUserAny(["logistics"]);
+  const auth = await requireUserAny(["logistics", "super_admin"]);
   if ("error" in auth) return auth.error;
   try {
     const { id: projectId } = await params;

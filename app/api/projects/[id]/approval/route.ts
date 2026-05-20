@@ -159,7 +159,7 @@ export async function POST(
     }
 
     if (body.action === "logistics_fulfill") {
-      const auth = await requireUserAny(["logistics"]);
+      const auth = await requireUserAny(["logistics", "super_admin"]);
       if ("error" in auth) return auth.error;
       if (project.approvalStatus !== "pending_logistics") {
         return jsonError(400, "Project is not awaiting logistics fulfillment");
@@ -224,7 +224,7 @@ export async function POST(
     }
 
     if (body.action === "logistics_reject") {
-      const auth = await requireUserAny(["logistics"]);
+      const auth = await requireUserAny(["logistics", "super_admin"]);
       if ("error" in auth) return auth.error;
       if (project.approvalStatus !== "pending_logistics") {
         return jsonError(400, "Project is not awaiting logistics review");
@@ -244,7 +244,7 @@ export async function POST(
     }
 
     if (body.action === "logistics_apply_patch") {
-      const auth = await requireUserAny(["logistics"]);
+      const auth = await requireUserAny(["logistics", "super_admin"]);
       if ("error" in auth) return auth.error;
       const patch = effectivePendingPatch(project.pendingPatch);
       const wantsDelete = project.pendingDeleteRequested === true;
@@ -315,7 +315,7 @@ export async function POST(
     }
 
     if (body.action === "logistics_reject_metadata_change") {
-      const auth = await requireUserAny(["logistics"]);
+      const auth = await requireUserAny(["logistics", "super_admin"]);
       if ("error" in auth) return auth.error;
       if (project.metadataChangeStage !== METADATA_PENDING_LOGISTICS) {
         return jsonError(400, "Nothing is queued for logistics to reject");

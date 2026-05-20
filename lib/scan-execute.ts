@@ -1,4 +1,4 @@
-import { and, eq, gte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   orderItems,
@@ -8,6 +8,7 @@ import {
   stockMovements,
   type Order,
 } from "@/db/schema";
+import { isBarcodeWarehouseVerified } from "@/lib/barcode-warehouse-verification";
 import { logOrderCompleteEvent } from "@/lib/order-complete-event";
 import {
   distanceMeters,
@@ -31,7 +32,9 @@ export type ScanExecuteError =
   /** In-app scan without GPS when the project has a geofence anchor. */
   | { kind: "geofence_location_required" }
   /** Scan coordinates are outside the project site radius. */
-  | { kind: "geofence_violation"; distanceMeters: number; radiusMeters: number };
+  | { kind: "geofence_violation"; distanceMeters: number; radiusMeters: number }
+  /** Project has no site address — on-site scans are blocked. */
+  | { kind: "site_not_configured" };
 
 export interface ScanExecuteSuccess {
   kind: "ok";
@@ -117,44 +120,48 @@ export async function executeScan({
 
     if (outcome.result === "valid") {
       const matched = items.find((i) => i.id === outcome.itemId)!;
-      if (
-        order.isLogisticsGate &&
-        (matched.logisticsScannedAt === null ||
-          matched.logisticsScannedAt === undefined)
-      ) {
+      sku = matched.productId;
+
+      const warehouseVerified = await isBarcodeWarehouseVerified(
+        tx,
+        order.projectId,
+        barcode,
+      );
+      if (!warehouseVerified) {
         return {
           kind: "logistics_not_verified",
           sku: matched.productId,
         };
       }
-      sku = matched.productId;
 
       const fkUserId = actor.isPrintedScan ? null : actor.userId;
 
-      const needsGeofence =
-        project && projectHasGeofence(project) && !actor.isPrintedScan;
+      const installerInApp = !actor.isPrintedScan;
       let geofenceFlagged = false;
       let scanLat: number | null = null;
       let scanLng: number | null = null;
 
-      if (needsGeofence) {
+      if (installerInApp) {
+        if (!project || !projectHasGeofence(project)) {
+          return { kind: "site_not_configured" };
+        }
         if (!scanLocation) {
           return { kind: "geofence_location_required" };
         }
         scanLat = scanLocation.latitude;
         scanLng = scanLocation.longitude;
-        const radius = project!.geofenceRadiusMeters ?? 500;
+        const radius = project.geofenceRadiusMeters ?? 500;
         const inside = isWithinGeofence(
-          project!.siteLatitude!,
-          project!.siteLongitude!,
+          project.siteLatitude!,
+          project.siteLongitude!,
           scanLat,
           scanLng,
           radius,
         );
         if (!inside) {
           const dist = distanceMeters(
-            project!.siteLatitude!,
-            project!.siteLongitude!,
+            project.siteLatitude!,
+            project.siteLongitude!,
             scanLat,
             scanLng,
           );
@@ -302,13 +309,16 @@ export async function findOrderByBarcode(barcode: string) {
       itemScannedAt: orderItems.scannedAt,
       orderId: orders.id,
       orderStatus: orders.status,
+      orderIsLogisticsGate: orders.isLogisticsGate,
       projectId: orders.projectId,
       projectName: projects.name,
+      projectApprovalStatus: projects.approvalStatus,
     })
     .from(orderItems)
     .innerJoin(orders, eq(orders.id, orderItems.orderId))
     .innerJoin(projects, eq(projects.id, orders.projectId))
     .where(eq(orderItems.barcode, barcode))
+    .orderBy(desc(orders.isLogisticsGate))
     .limit(1);
   return row ?? null;
 }

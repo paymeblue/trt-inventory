@@ -46,6 +46,8 @@ export const users = pgTable(
     passwordHash: text("password_hash").notNull(),
     role: roleEnum("role").notNull(),
     name: text("name").notNull(),
+    /** Optional contact number for receivers (and other roles). */
+    phone: text("phone"),
     createdById: uuid("created_by_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()

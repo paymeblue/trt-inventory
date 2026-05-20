@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   extractBarcodeFromPayload,
   extractScanDeepLink,
+  normalizeScanBarcode,
 } from '@/lib/scan-deep-link';
 
 /**
@@ -121,5 +122,17 @@ describe('extractBarcodeFromPayload', () => {
       'https://evil.example.com/x',
     );
     expect(extractBarcodeFromPayload('not a barcode')).toBe('not a barcode');
+  });
+});
+
+describe('normalizeScanBarcode', () => {
+  it('uppercases TRT packing codes from URLs', () => {
+    expect(
+      normalizeScanBarcode('https://app.test/s/trt-abc123def456?st=x'),
+    ).toBe('TRT-ABC123DEF456');
+  });
+
+  it('uppercases bare codes typed by a scanner', () => {
+    expect(normalizeScanBarcode('trt-lnmx5npmlgzg')).toBe('TRT-LNMX5NPMLGZG');
   });
 });
