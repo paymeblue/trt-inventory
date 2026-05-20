@@ -44,7 +44,7 @@ function logisticsFlashForOutcome(
 ): string {
   switch (outcome.result) {
     case 'valid':
-      return 'Warehouse line recorded. On-hand stock was updated for this SKU.';
+      return 'Warehouse line verified. Stock is deducted when receivers scan this SKU on the delivery order.';
     case 'duplicate':
       return 'Already scanned in the warehouse.';
     case 'invalid': {
@@ -380,11 +380,11 @@ export default function ProjectLogisticsScanPage({
       )}
 
       <section className="card border-[color:var(--border)] p-5">
-        <h2 className="text-base font-semibold">Approve for installers</h2>
+        <h2 className="text-base font-semibold">Activate for receivers</h2>
         <p className="mt-1 text-xs text-[color:var(--text-muted)]">
           {hasLines
-            ? 'When each line reads "Warehouse scanned", approve so receivers can verify the same stickers on site.'
-            : 'Approve to release this empty project.'}
+            ? 'Logistics only verifies packing in the warehouse. When every line is verified, activate the project so receivers can fulfill PM delivery orders on site.'
+            : 'Activate to release this empty project for receivers.'}
         </p>
         <div className="mt-4 flex flex-wrap gap-3">
           <button
@@ -395,7 +395,7 @@ export default function ProjectLogisticsScanPage({
             }
             onClick={() => fulfillMut.mutate()}
           >
-            {fulfillMut.isPending ? 'Approving…' : 'Approve project'}
+            {fulfillMut.isPending ? 'Activating…' : 'Activate project'}
           </button>
           {!logisticsComplete && hasLines ? (
             <span className="self-center text-xs text-[color:var(--text-muted)]">

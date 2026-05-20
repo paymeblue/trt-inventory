@@ -18,6 +18,7 @@ import {
   disputePriorityLabel,
 } from "@/lib/dispute-labels";
 import type { DisputeCategory, DisputePriority } from "@/db/schema";
+import { DisputePhotoDropzone } from "@/components/dispute-photo-dropzone";
 
 interface ProjectLite {
   id: string;
@@ -253,7 +254,12 @@ export default function NewDisputePage() {
             placeholder="Start typing — pick an order UUID from hints"
             value={orderId}
             list={datalistId}
-            onChange={(e) => setOrderId(e.target.value)}
+            onChange={(e) => {
+              const v = e.target.value;
+              setOrderId(v);
+              const match = allOrders.find((o) => o.id === v.trim());
+              if (match) setProjectId(match.projectId);
+            }}
             spellCheck={false}
             autoComplete="off"
             aria-invalid={
@@ -266,7 +272,12 @@ export default function NewDisputePage() {
             value={
               allOrders.some((o) => o.id === orderId.trim()) ? orderId : ""
             }
-            onChange={(e) => setOrderId(e.target.value)}
+            onChange={(e) => {
+              const id = e.target.value;
+              setOrderId(id);
+              const match = allOrders.find((o) => o.id === id);
+              if (match) setProjectId(match.projectId);
+            }}
           >
             <option value="">— Or choose from dropdown —</option>
             {filteredOrders.map((o) => (
@@ -294,17 +305,16 @@ export default function NewDisputePage() {
           ) : null}
         </div>
 
-        <label className="block">
-          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
-            Photo (optional, max 2.5 MB)
+        <div className="block">
+          <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
+            Photo evidence (optional)
           </span>
-          <input
-            type="file"
-            accept="image/*"
-            className="text-sm"
-            onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
+          <DisputePhotoDropzone
+            file={photo}
+            onFileChange={setPhoto}
+            disabled={busy}
           />
-        </label>
+        </div>
         {error ? (
           <p className="text-xs text-[color:var(--danger)]">{error}</p>
         ) : null}

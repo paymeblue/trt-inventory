@@ -36,7 +36,9 @@ export async function GET() {
           return false;
         }
         if (auth.actor.role === "installer") {
-          return o.project?.approvalStatus === "active";
+          return (
+            o.project?.approvalStatus === "active" && !o.isLogisticsGate
+          );
         }
         return true;
       })

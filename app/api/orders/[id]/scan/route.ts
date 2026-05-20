@@ -39,6 +39,12 @@ async function handlePost(
     if (result.kind === "order_fulfilled") {
       return jsonError(400, "Order is already fully fulfilled");
     }
+    if (result.kind === "not_delivery_order") {
+      return jsonError(
+        403,
+        "This shipment is for warehouse verification only. Receivers fulfill PM delivery orders on site, not the logistics gate list.",
+      );
+    }
     if (result.kind === "sku_deleted") {
       return jsonError(
         409,

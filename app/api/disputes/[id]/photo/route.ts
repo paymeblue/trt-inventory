@@ -11,7 +11,7 @@ import {
   disputesVisibleWhere,
 } from "@/lib/dispute-access";
 
-const DISPUTE_UPLOAD_REL = ".data/dispute-photos";
+import { DISPUTE_UPLOAD_REL } from "@/lib/dispute-photo";
 
 const MIME_EXT: Record<string, string> = {
   png: "image/png",

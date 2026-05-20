@@ -1,5 +1,3 @@
-import { mkdir, writeFile } from "fs/promises";
-import { join } from "path";
 import { NextResponse, type NextRequest } from "next/server";
 import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
@@ -12,8 +10,8 @@ import {
   disputesVisibleWhere,
 } from "@/lib/dispute-access";
 import { recordDisputeEvent } from "@/lib/dispute-events";
-
-const DISPUTE_UPLOAD_REL = ".data/dispute-photos";
+import { newDisputeId, saveDisputePhoto } from "@/lib/dispute-photo";
+import { getPostgresErrorMeta } from "@/lib/postgres-errors";
 
 const createJsonSchema = z
   .object({
@@ -38,11 +36,13 @@ const createJsonSchema = z
     path: ["projectId"],
   });
 
-async function enforceContextConsistency(
+async function resolveProjectAndOrder(
   projectId: string | null,
   orderId: string | null,
-) {
-  if (!orderId) return;
+): Promise<{ projectId: string | null; orderId: string | null }> {
+  if (!orderId) {
+    return { projectId, orderId };
+  }
   const order = await db.query.orders.findFirst({
     where: eq(orders.id, orderId),
     columns: { projectId: true },
@@ -50,9 +50,49 @@ async function enforceContextConsistency(
   if (!order) {
     throw new Error("ORDER_NOT_FOUND");
   }
+  const resolvedProjectId = projectId ?? order.projectId;
   if (projectId && order.projectId !== projectId) {
     throw new Error("ORDER_PROJECT_MISMATCH");
   }
+  return {
+    projectId: resolvedProjectId,
+    orderId,
+  };
+}
+
+function disputeApiError(err: unknown) {
+  const meta = getPostgresErrorMeta(err);
+  if (meta.code === "42703" || meta.code === "42P01") {
+    return jsonError(
+      503,
+      "Dispute tables are out of date. Run npm run db:migrate and try again.",
+    );
+  }
+  if (err instanceof Error) {
+    if (err.message === "ORDER_NOT_FOUND") {
+      return jsonError(
+        400,
+        "No order exists with that ID, or your account can't see it. Pick an order from the list.",
+      );
+    }
+    if (err.message === "ORDER_PROJECT_MISMATCH") {
+      return jsonError(400, "Order does not belong to the selected project");
+    }
+    if (
+      err.message.includes("image") ||
+      err.message.includes("2.5 MB") ||
+      err.message.includes("empty")
+    ) {
+      return jsonError(400, err.message);
+    }
+    if (err.message.includes("ENOENT") || err.message.includes("EACCES")) {
+      return jsonError(
+        500,
+        "Could not save the photo on the server. Try again without a photo or contact support.",
+      );
+    }
+  }
+  return handleError(err);
 }
 
 /**
@@ -125,8 +165,8 @@ export async function POST(req: NextRequest) {
       description = String(formData.get("description") ?? "").trim();
       const p = formData.get("projectId");
       const o = formData.get("orderId");
-      projectId = typeof p === "string" && p ? p : null;
-      orderId = typeof o === "string" && o ? o : null;
+      projectId = typeof p === "string" && p.trim() ? p.trim() : null;
+      orderId = typeof o === "string" && o.trim() ? o.trim() : null;
       const f = formData.get("photo");
       photoFile =
         typeof File !== "undefined" && f instanceof File && f.size > 0
@@ -143,12 +183,12 @@ export async function POST(req: NextRequest) {
           "documentation",
           "other",
         ])
-        .safeParse(cat);
+        .safeParse(typeof cat === "string" && cat ? cat : undefined);
       if (catParsed.success) category = catParsed.data;
       const priParsed = z
         .enum(["low", "normal", "high", "urgent"])
-        .safeParse(pri);
-      if (priParsed.success) priority = priParsed.data;
+        .safeParse(typeof pri === "string" && pri ? pri : "normal");
+      priority = priParsed.success ? priParsed.data : "normal";
     } else {
       const body = createJsonSchema.parse(await req.json());
       title = body.title;
@@ -169,9 +209,13 @@ export async function POST(req: NextRequest) {
     if (orderId && !z.string().uuid().safeParse(orderId).success) {
       return jsonError(
         400,
-        "That order identifier is not a valid UUID — pick one from the order picker in the form.",
+        "That order identifier is not a valid UUID — pick one from the order picker.",
       );
     }
+
+    const resolved = await resolveProjectAndOrder(projectId, orderId);
+    projectId = resolved.projectId;
+    orderId = resolved.orderId;
 
     if (projectId) {
       const p = await db.query.projects.findFirst({
@@ -180,33 +224,21 @@ export async function POST(req: NextRequest) {
       if (!p) return jsonError(400, "Project not found");
     }
 
-    try {
-      await enforceContextConsistency(projectId, orderId);
-    } catch (e) {
-      const msg = (e as Error).message;
-      if (msg === "ORDER_NOT_FOUND") {
-        return jsonError(
-          400,
-          "No order exists with that ID, or your account can't see it. Pick an order from the list.",
-        );
-      }
-      if (msg === "ORDER_PROJECT_MISMATCH") {
-        return jsonError(
-          400,
-          "Order does not belong to the selected project",
-        );
-      }
-      throw e;
-    }
-
+    const disputeId = newDisputeId();
     let photoPath: string | null = null;
-    if (photoFile && photoFile.size > 2_500_000) {
-      return jsonError(400, "Photo must be under 2.5 MB");
+
+    if (photoFile) {
+      try {
+        photoPath = await saveDisputePhoto(disputeId, photoFile);
+      } catch (e) {
+        return jsonError(400, (e as Error).message);
+      }
     }
 
     const [created] = await db
       .insert(disputes)
       .values({
+        id: disputeId,
         title,
         description,
         createdById: auth.actor.userId,
@@ -221,39 +253,25 @@ export async function POST(req: NextRequest) {
 
     if (!created) return jsonError(500, "Failed to create dispute");
 
-    await recordDisputeEvent({
-      disputeId: created.id,
-      userId: auth.actor.userId,
-      eventType: "created",
-      detail: {
-        title,
-        category: category ?? null,
-        priority: priority ?? "normal",
-      },
-    });
-
-    if (photoFile) {
-      const absDir = join(process.cwd(), DISPUTE_UPLOAD_REL);
-      await mkdir(absDir, { recursive: true });
-      const ext =
-        photoFile.name && /\.[a-z0-9]+$/i.test(photoFile.name)
-          ? photoFile.name.match(/\.([a-z0-9]+)$/i)![1]!.toLowerCase()
-          : "bin";
-      const fname = `${created.id}.${ext}`;
-      const buf = Buffer.from(await photoFile.arrayBuffer());
-      await writeFile(join(absDir, fname), buf);
-      photoPath = fname;
-      await db
-        .update(disputes)
-        .set({ photoPath, updatedAt: new Date() })
-        .where(eq(disputes.id, created.id));
+    try {
+      await recordDisputeEvent({
+        disputeId: created.id,
+        userId: auth.actor.userId,
+        eventType: "created",
+        detail: {
+          title,
+          category: category ?? null,
+          priority: priority ?? "normal",
+          hasPhoto: Boolean(photoPath),
+        },
+      });
+    } catch (eventErr) {
+      await db.delete(disputes).where(eq(disputes.id, created.id));
+      return disputeApiError(eventErr);
     }
 
-    return NextResponse.json(
-      { dispute: { ...created, photoPath } },
-      { status: 201 },
-    );
+    return NextResponse.json({ dispute: created }, { status: 201 });
   } catch (err) {
-    return handleError(err);
+    return disputeApiError(err);
   }
 }

@@ -203,7 +203,7 @@ async function scanDeepLinkInner(
           : 'Unknown code for this shipment';
     const whBody =
       wh.result === 'valid'
-        ? `SKU ${logisticsResult.stock?.sku ?? '—'} verified in the warehouse. ${logisticsResult.progress.remaining} line(s) left before you can activate the project for receivers.`
+        ? `SKU ${logisticsResult.sku ?? '—'} verified in the warehouse. ${logisticsResult.progress.remaining} line(s) left before you can activate the project for receivers.`
         : wh.result === 'duplicate'
           ? 'This packing QR was already counted in the warehouse scan list.'
           : 'This code is not on the logistics gate list for this project.';
@@ -230,6 +230,16 @@ async function scanDeepLinkInner(
         status="blocked"
         title="Order gone"
         body="This barcode's order was deleted after the label was printed. There's nothing to acknowledge."
+        hideNavigation={hideNavigation}
+      />
+    );
+  }
+  if (result.kind === 'not_delivery_order') {
+    return (
+      <OutcomeShell
+        status="blocked"
+        title="Warehouse verification only"
+        body="This QR belongs to the logistics warehouse checklist, not a delivery order. Receivers fulfill PM orders on site after logistics activates the project."
         hideNavigation={hideNavigation}
       />
     );

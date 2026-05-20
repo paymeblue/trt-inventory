@@ -81,8 +81,8 @@ export function computeProgress(
 }
 
 /**
- * Same semantics as installer `resolveScan`, but uses logistics warehouse fields
- * and never advances the order to fulfilled (that happens after site scans).
+ * Warehouse verification only — uses logistics fields and never fulfills
+ * the gate shipment or decrements stock (receivers fulfill delivery orders).
  */
 export function resolveLogisticsScan(
   input: LogisticsScanComputationInput,

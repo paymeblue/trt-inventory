@@ -30,6 +30,8 @@ export type ScanExecuteError =
   | { kind: "installer_not_assigned" }
   /** Gate-order line must be scanned in the warehouse before on-site scans. */
   | { kind: "logistics_not_verified"; sku: string }
+  /** Delivery orders only — logistics gate shipment is warehouse-only. */
+  | { kind: "not_delivery_order" }
   /** In-app scan without GPS when the project has a geofence anchor. */
   | { kind: "geofence_location_required" }
   /** Scan coordinates are outside the project site radius. */
@@ -81,6 +83,7 @@ export async function executeScan({
       where: eq(orders.id, orderId),
     });
     if (!order) return { kind: "order_not_found" };
+    if (order.isLogisticsGate) return { kind: "not_delivery_order" };
     if (order.status === "fulfilled") return { kind: "order_fulfilled" };
 
     const project = await tx.query.projects.findFirst({
@@ -191,55 +194,40 @@ export async function executeScan({
         );
       }
 
-      const warehouseAlreadyCounted =
-        matched.logisticsScannedAt !== null &&
-        matched.logisticsScannedAt !== undefined;
+      const [prodRow] = await tx
+        .update(products)
+        .set({ stockQuantity: sql`${products.stockQuantity} - 1` })
+        .where(
+          and(
+            eq(products.projectId, order.projectId),
+            eq(products.sku, sku),
+            gte(products.stockQuantity, 1),
+          ),
+        )
+        .returning({ stock: products.stockQuantity, id: products.id });
 
-      if (!warehouseAlreadyCounted) {
-        const [prodRow] = await tx
-          .update(products)
-          .set({ stockQuantity: sql`${products.stockQuantity} - 1` })
-          .where(
-            and(
-              eq(products.projectId, order.projectId),
-              eq(products.sku, sku),
-              gte(products.stockQuantity, 1),
-            ),
-          )
-          .returning({ stock: products.stockQuantity, id: products.id });
-
-        if (!prodRow) {
-          const exists = await tx.query.products.findFirst({
-            where: and(
-              eq(products.projectId, order.projectId),
-              eq(products.sku, sku),
-            ),
-            columns: { id: true },
-          });
-          if (!exists) return { kind: "sku_deleted", sku };
-          return { kind: "insufficient_stock", sku };
-        }
-
-        stockAfter = prodRow.stock;
-
-        await tx.insert(stockMovements).values({
-          productId: prodRow.id,
-          delta: -1,
-          reason: "order_scan",
-          orderId,
-          orderItemId: outcome.itemId,
-          userId: fkUserId,
-        });
-      } else {
-        const prod = await tx.query.products.findFirst({
+      if (!prodRow) {
+        const exists = await tx.query.products.findFirst({
           where: and(
             eq(products.projectId, order.projectId),
             eq(products.sku, sku),
           ),
-          columns: { stockQuantity: true },
+          columns: { id: true },
         });
-        if (prod) stockAfter = prod.stockQuantity;
+        if (!exists) return { kind: "sku_deleted", sku };
+        return { kind: "insufficient_stock", sku };
       }
+
+      stockAfter = prodRow.stock;
+
+      await tx.insert(stockMovements).values({
+        productId: prodRow.id,
+        delta: -1,
+        reason: "order_scan",
+        orderId,
+        orderItemId: outcome.itemId,
+        userId: fkUserId,
+      });
 
       await tx
         .update(orderItems)
