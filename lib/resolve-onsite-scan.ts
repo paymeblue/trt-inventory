@@ -75,7 +75,7 @@ export async function findDeliveryLineForSku(
         eq(orders.projectId, projectId),
         eq(orders.isLogisticsGate, false),
         eq(orders.status, "active"),
-        eq(orderItems.productId, sku),
+        sql`lower(${orderItems.productId}) = lower(${sku})`,
         isNull(orderItems.scannedAt),
       ),
     )
@@ -114,6 +114,8 @@ export async function resolveOnSiteScanTarget(
     if (deliveryLine) {
       return { ...deliveryLine, matchedViaGateSticker: true };
     }
+    // Active projects must fulfill delivery lines — never return the gate row.
+    return null;
   }
 
   return { ...gateHit, matchedViaGateSticker: false };

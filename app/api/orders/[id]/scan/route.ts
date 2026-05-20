@@ -3,7 +3,13 @@ import { z } from "zod";
 import { requireUser } from "@/lib/auth-guard";
 import { handleError, jsonError } from "@/lib/api";
 import { instrumentRouteHandler } from "@/lib/observability/instrument";
+import {
+  findDeliveryLineForSku,
+  findRowsByBarcode,
+  resolveOnSiteScanTarget,
+} from "@/lib/resolve-onsite-scan";
 import { executeScan } from "@/lib/scan-execute";
+import { projectReadyForOnSiteVerification } from "@/lib/project-live";
 
 const scanSchema = z.object({
   barcode: z.string().trim().min(1),
@@ -19,16 +25,46 @@ async function handlePost(
   const auth = await requireUser("installer");
   if ("error" in auth) return auth.error;
   try {
-    const { id } = await ctx.params;
     const body = scanSchema.parse(await req.json());
     const scanLocation =
       body.latitude !== undefined && body.longitude !== undefined
         ? { latitude: body.latitude, longitude: body.longitude }
         : undefined;
 
+    const target = await resolveOnSiteScanTarget(body.barcode);
+    if (!target) {
+      const rows = await findRowsByBarcode(body.barcode);
+      const gate = rows.find((r) => r.orderIsLogisticsGate);
+      if (
+        gate &&
+        projectReadyForOnSiteVerification(gate.projectApprovalStatus)
+      ) {
+        const open = await findDeliveryLineForSku(
+          gate.projectId,
+          gate.productId,
+        );
+        if (!open) {
+          return jsonError(
+            400,
+            `Warehouse sticker (SKU ${gate.productId}) is verified, but there is no open line on a PM delivery order for "${gate.projectName}" yet. Ask your PM to create a delivery order, then scan the same sticker on site.`,
+          );
+        }
+      }
+      return jsonError(
+        404,
+        "This sticker is not part of any order in this workspace.",
+      );
+    }
+    if (target.orderIsLogisticsGate) {
+      return jsonError(
+        403,
+        "This shipment is for warehouse verification only. Receivers fulfill PM delivery orders on site, not the logistics gate list.",
+      );
+    }
+
     const result = await executeScan({
-      orderId: id,
-      barcode: body.barcode,
+      orderId: target.orderId,
+      barcode: target.itemBarcode,
       actor: auth.actor,
       scanLocation,
     });

@@ -2,11 +2,13 @@ import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { db } from "@/db";
 import { orderItems, orders } from "@/db/schema";
 
+/** PM delivery orders only — the logistics gate list is separate. */
+const pmOrderOnly = eq(orders.isLogisticsGate, false);
+
 /**
- * A project may only receive a **new** order while it has no open shipment
- * snapshot, no fulfilled orders, and no on-site verified line (`scanned_at`).
- * Otherwise creating another order would collide with the logistics gate order
- * or re-seed SKUs incorrectly.
+ * A project may only receive a **new** PM delivery order while it has no open
+ * delivery snapshot, no fulfilled delivery orders, and no on-site verified
+ * delivery line (`scanned_at`). The logistics gate order does not count.
  */
 export async function findProjectIdsBlockedForNewOrder(): Promise<Set<string>> {
   const blocked = new Set<string>();
@@ -14,7 +16,12 @@ export async function findProjectIdsBlockedForNewOrder(): Promise<Set<string>> {
   const activeRows = await db
     .select({ projectId: orders.projectId })
     .from(orders)
-    .where(inArray(orders.status, ["draft", "active", "anomaly"]))
+    .where(
+      and(
+        pmOrderOnly,
+        inArray(orders.status, ["draft", "active", "anomaly"]),
+      ),
+    )
     .groupBy(orders.projectId);
 
   for (const r of activeRows) blocked.add(r.projectId);
@@ -22,7 +29,7 @@ export async function findProjectIdsBlockedForNewOrder(): Promise<Set<string>> {
   const fulfilledRows = await db
     .select({ projectId: orders.projectId })
     .from(orders)
-    .where(eq(orders.status, "fulfilled"))
+    .where(and(pmOrderOnly, eq(orders.status, "fulfilled")))
     .groupBy(orders.projectId);
 
   for (const r of fulfilledRows) blocked.add(r.projectId);
@@ -31,7 +38,7 @@ export async function findProjectIdsBlockedForNewOrder(): Promise<Set<string>> {
     .select({ projectId: orders.projectId })
     .from(orders)
     .innerJoin(orderItems, eq(orderItems.orderId, orders.id))
-    .where(isNotNull(orderItems.scannedAt))
+    .where(and(pmOrderOnly, isNotNull(orderItems.scannedAt)))
     .groupBy(orders.projectId);
 
   for (const r of scannedRows) blocked.add(r.projectId);
@@ -48,6 +55,7 @@ export async function isProjectEligibleForNewOrder(
     .where(
       and(
         eq(orders.projectId, projectId),
+        pmOrderOnly,
         inArray(orders.status, ["draft", "active", "anomaly"]),
       ),
     )
@@ -59,7 +67,11 @@ export async function isProjectEligibleForNewOrder(
     .select({ id: orders.id })
     .from(orders)
     .where(
-      and(eq(orders.projectId, projectId), eq(orders.status, "fulfilled")),
+      and(
+        eq(orders.projectId, projectId),
+        pmOrderOnly,
+        eq(orders.status, "fulfilled"),
+      ),
     )
     .limit(1);
 
@@ -70,7 +82,11 @@ export async function isProjectEligibleForNewOrder(
     .from(orderItems)
     .innerJoin(orders, eq(orders.id, orderItems.orderId))
     .where(
-      and(eq(orders.projectId, projectId), isNotNull(orderItems.scannedAt)),
+      and(
+        eq(orders.projectId, projectId),
+        pmOrderOnly,
+        isNotNull(orderItems.scannedAt),
+      ),
     )
     .limit(1);
 
