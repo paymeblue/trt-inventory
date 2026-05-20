@@ -1,4 +1,6 @@
+import type { Order } from "@/db/schema";
 import type { ScanOutcome } from "@/lib/scan";
+import type { OrderDetailProgress } from "@/lib/patch-order-detail-from-scan";
 
 /**
  * High-level classification of what happened on the wire for a scan call.
@@ -11,6 +13,8 @@ export type ScanCallResult =
   | {
       kind: "outcome";
       outcome: ScanOutcome;
+      order?: Order;
+      progress?: OrderDetailProgress;
       stock?: { sku: string; stockQuantity: number };
     }
   | { kind: "auth"; message: string }
@@ -22,6 +26,8 @@ export type ScanCallResult =
 
 export interface ScanApiSuccessBody {
   outcome: ScanOutcome;
+  order?: Order;
+  progress?: OrderDetailProgress;
   stock?: { sku: string; stockQuantity: number };
 }
 
@@ -40,7 +46,13 @@ export function classifyScanResponse(
 ): ScanCallResult {
   if (response.ok) {
     const ok = body as ScanApiSuccessBody;
-    return { kind: "outcome", outcome: ok.outcome, stock: ok.stock };
+    return {
+      kind: "outcome",
+      outcome: ok.outcome,
+      order: ok.order,
+      progress: ok.progress,
+      stock: ok.stock,
+    };
   }
 
   const err = body as ScanApiErrorBody;

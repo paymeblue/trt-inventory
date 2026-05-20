@@ -1,7 +1,9 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
 import useSWR from "@/lib/swr";
+import { onWorkspaceOrdersChanged } from "@/lib/workspace-refresh";
 import { StatusPill } from "@/components/status-pill";
 import { useAuthedUser } from "@/components/session-context";
 import { InstallerFlow } from "@/components/installer-flow";
@@ -45,7 +47,9 @@ function dashboardBlurb(role: Role): string {
 
 export default function DashboardPage() {
   const user = useAuthedUser();
-  const { data, error, isLoading } = useSWR<StatsResponse>("/api/stats");
+  const { data, error, isLoading, mutate } = useSWR<StatsResponse>("/api/stats");
+
+  useEffect(() => onWorkspaceOrdersChanged(() => void mutate()), [mutate]);
 
   if (!user) return null;
 

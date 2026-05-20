@@ -9,11 +9,18 @@ describe("classifyScanResponse", () => {
   it("returns outcome when response is ok", () => {
     const r = classifyScanResponse(
       { ok: true, status: 200 },
-      { outcome: { result: "valid", itemId: "abc" }, stock: { sku: "SKU", stockQuantity: 9 } },
+      {
+        outcome: { result: "valid", itemId: "abc" },
+        order: { id: "o1", status: "fulfilled" },
+        progress: { total: 1, scanned: 1, remaining: 0, percent: 100 },
+        stock: { sku: "SKU", stockQuantity: 9 },
+      },
     );
     expect(r.kind).toBe("outcome");
     if (r.kind === "outcome") {
       expect(r.outcome).toEqual({ result: "valid", itemId: "abc" });
+      expect(r.order?.status).toBe("fulfilled");
+      expect(r.progress?.percent).toBe(100);
       expect(r.stock).toEqual({ sku: "SKU", stockQuantity: 9 });
     }
   });

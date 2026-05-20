@@ -11,7 +11,7 @@ import {
 } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthedUser } from '@/components/session-context';
 import { QrCode } from '@/components/qr-code';
 import { buildScanUrl } from '@/lib/scan-url';
@@ -29,6 +29,13 @@ import {
 } from '@/lib/scan-client';
 import { ResourceLoadError } from '@/components/resource-load-error';
 import { fetchJson } from '@/lib/fetch-json';
+import { patchOrderDetailFromScan } from '@/lib/patch-order-detail-from-scan';
+import {
+  invalidateWorkspaceOrders,
+  queryKeys,
+} from '@/lib/query-keys';
+import { emitWorkspaceOrdersChanged } from '@/lib/workspace-refresh';
+import type { ScanApiSuccessBody } from '@/lib/scan-client';
 
 /**
  * The order detail API enriches each item with a signed printed-scan
@@ -113,6 +120,7 @@ export default function OrderDetailPage({
   const { id } = use(params);
   const router = useRouter();
   const user = useAuthedUser();
+  const queryClient = useQueryClient();
 
   const orderQuery = useQuery({
     queryKey: ['order-detail', id],
@@ -132,6 +140,18 @@ export default function OrderDetailPage({
       fetchJson<ProjectDetailResponse>(`/api/projects/${projectId!}`),
     enabled: !!projectId,
   });
+
+  const applyScanToCache = useCallback(
+    (body: ScanApiSuccessBody) => {
+      queryClient.setQueryData<DetailResponse>(['order-detail', id], (prev) =>
+        patchOrderDetailFromScan(prev, body),
+      );
+      void invalidateWorkspaceOrders(queryClient);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.orders });
+      emitWorkspaceOrdersChanged();
+    },
+    [queryClient, id],
+  );
 
   const refresh = useCallback(async () => {
     await Promise.all([
@@ -265,13 +285,23 @@ export default function OrderDetailPage({
             printed QR code on the box (phone camera — no login required).
           </p>
         </div>
-      ) : canScan ? (
-        <InstallerView
-          orderId={data.order.id}
-          items={data.items}
-          productByKey={productByKey}
-          refresh={refresh}
-        />
+      ) : user.role === 'installer' && isAssignedInstaller ? (
+        <>
+          {data.order.status === 'fulfilled' && (
+            <OrderResolvedCard total={data.items.length} />
+          )}
+          {canScan ? (
+            <InstallerView
+              orderId={data.order.id}
+              items={data.items}
+              productByKey={productByKey}
+              refresh={refresh}
+              applyScanToCache={applyScanToCache}
+            />
+          ) : data.order.status !== 'fulfilled' ? (
+            <ReadOnlyItems items={data.items} productByKey={productByKey} />
+          ) : null}
+        </>
       ) : (
         <ReadOnlyItems items={data.items} productByKey={productByKey} />
       )}
@@ -504,11 +534,13 @@ function InstallerView({
   items,
   productByKey,
   refresh,
+  applyScanToCache,
 }: {
   orderId: string;
   items: OrderItemWithToken[];
   productByKey: Map<string, Product>;
   refresh: () => Promise<void>;
+  applyScanToCache: (body: ScanApiSuccessBody) => void;
 }) {
   const router = useRouter();
   const [feed, setFeed] = useState<FeedEntry[]>([]);
@@ -616,6 +648,12 @@ function InstallerView({
 
       setTransportError(null);
       const { outcome } = result;
+      applyScanToCache({
+        outcome,
+        order: result.order,
+        progress: result.progress,
+        stock: result.stock,
+      });
       setLastOutcome({
         outcome,
         stockAfter: result.stock?.stockQuantity,
@@ -663,7 +701,7 @@ function InstallerView({
         // and the next periodic revalidation will catch us up.
       }
     },
-    [orderId, itemById, refresh, router],
+    [orderId, itemById, refresh, router, applyScanToCache],
   );
 
   const tourSteps: TourStep[] = [
