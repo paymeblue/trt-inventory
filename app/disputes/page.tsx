@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/fetch-json";
+import { queryKeys } from "@/lib/query-keys";
 import { useAuthedUser } from "@/components/session-context";
 import { PageLoading } from "@/components/page-loading";
 import {
@@ -30,10 +31,10 @@ interface DisputeListRow {
 export default function DisputesListPage() {
   const user = useAuthedUser();
   const { data, error, refetch, isPending } = useQuery({
-    queryKey: ["disputes", "list"],
+    queryKey: queryKeys.disputesList,
     queryFn: () => fetchJson<{ disputes: DisputeListRow[] }>("/api/disputes"),
     enabled: !!user,
-    refetchInterval: 20_000,
+    staleTime: 0,
   });
 
   if (!user) return null;

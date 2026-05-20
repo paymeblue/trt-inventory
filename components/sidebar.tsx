@@ -127,10 +127,9 @@ export function Sidebar() {
       }>("/api/approvals/queue-counts"),
     enabled:
       !!user && (user.role === "super_admin" || user.role === "logistics"),
-    staleTime: 15_000,
-    /** Super-admin disputes badge: others can open threads without this client mounted. */
-    refetchInterval:
-      user?.role === "super_admin" ? 60_000 : false,
+    staleTime: 0,
+    /** Fallback poll when another tab or role changes queues; mutations invalidate immediately. */
+    refetchInterval: 20_000,
   });
 
   if (!user) return null;

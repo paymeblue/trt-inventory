@@ -8,6 +8,7 @@ import type {
   DisputeStatus,
 } from "@/db/schema";
 import { fetchJson } from "@/lib/fetch-json";
+import { invalidateAfterDisputeAction } from "@/lib/query-keys";
 import {
   DISPUTE_CATEGORY_OPTIONS,
   DISPUTE_PRIORITY_OPTIONS,
@@ -60,8 +61,7 @@ export function DisputeResolutionPanel({
     onSuccess: async () => {
       setError(null);
       setShowResolveForm(false);
-      await qc.invalidateQueries({ queryKey: ["disputes", "detail", disputeId] });
-      await qc.invalidateQueries({ queryKey: ["disputes", "list"] });
+      await invalidateAfterDisputeAction(qc, disputeId);
     },
     onError: (e) => setError((e as Error).message),
   });

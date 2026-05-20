@@ -7,7 +7,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Order, OrderItem, Project } from '@/db/schema';
 import type { ScanOutcome } from '@/lib/scan';
 import { fetchJson } from '@/lib/fetch-json';
-import { queryKeys } from '@/lib/query-keys';
+import {
+  invalidateWorkspaceBadges,
+  invalidateWorkspaceProjects,
+  queryKeys,
+} from '@/lib/query-keys';
 import { buildScanUrl } from '@/lib/scan-url';
 import { normalizeScanBarcode } from '@/lib/scan-deep-link';
 import { QrCode } from '@/components/qr-code';
@@ -98,8 +102,13 @@ export default function ProjectLogisticsScanPage({
       qc.invalidateQueries({ queryKey: queryKeys.projects }),
       qc.invalidateQueries({ queryKey: queryKeys.orders }),
       qc.invalidateQueries({ queryKey: ['logistics-gate'] }),
+      invalidateWorkspaceBadges(qc),
     ]);
   }, [qc, projectId]);
+
+  const invalidateAfterFulfill = useCallback(async () => {
+    await invalidateWorkspaceProjects(qc);
+  }, [qc]);
 
   const scanMut = useMutation({
     mutationFn: (barcode: string) =>
@@ -122,7 +131,7 @@ export default function ProjectLogisticsScanPage({
         body: JSON.stringify({ action: 'logistics_fulfill' }),
       }),
     onSuccess: async () => {
-      await invalidate();
+      await invalidateAfterFulfill();
       router.push('/approvals/logistics');
     },
   });

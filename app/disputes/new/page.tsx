@@ -6,7 +6,11 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import useSWR from "@/lib/swr";
 import { useAuthedUser } from "@/components/session-context";
-import { queryKeys } from "@/lib/query-keys";
+import {
+  invalidateDisputeQueries,
+  invalidateWorkspaceBadges,
+  queryKeys,
+} from "@/lib/query-keys";
 import {
   DISPUTE_CATEGORY_OPTIONS,
   DISPUTE_PRIORITY_OPTIONS,
@@ -103,7 +107,10 @@ export default function NewDisputePage() {
         dispute?: { id: string };
       };
       if (!res.ok) throw new Error(json.error ?? "Could not submit");
-      await qc.invalidateQueries({ queryKey: queryKeys.approvalsQueueCounts });
+      await Promise.all([
+        invalidateWorkspaceBadges(qc),
+        invalidateDisputeQueries(qc),
+      ]);
       if (json.dispute?.id) {
         router.push(`/disputes/${json.dispute.id}`);
       } else router.push("/disputes");

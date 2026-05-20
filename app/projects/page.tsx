@@ -4,7 +4,10 @@ import Link from "next/link";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/fetch-json";
-import { queryKeys } from "@/lib/query-keys";
+import {
+  invalidateWorkspaceBadges,
+  queryKeys,
+} from "@/lib/query-keys";
 import {
   AddressPicker,
   type SiteSelection,
@@ -84,7 +87,10 @@ export default function ProjectsPage() {
       {showForm && canCreateProject && (
         <NewProjectForm
           onDone={async () => {
-            await qc.invalidateQueries({ queryKey: queryKeys.projects });
+            await Promise.all([
+              qc.invalidateQueries({ queryKey: queryKeys.projects }),
+              invalidateWorkspaceBadges(qc),
+            ]);
             setShowForm(false);
           }}
           onCancel={() => setShowForm(false)}

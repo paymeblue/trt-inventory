@@ -284,8 +284,8 @@ async function scanDeepLinkInner(
     return (
       <OutcomeShell
         status="blocked"
-        title="Warehouse verification required"
-        body={`This packing QR must be scanned in the warehouse before on-site verification (SKU ${result.sku}). Logistics: open Warehouse scan from Awaiting logistics and scan every line. Receivers use the same sticker only after that.`}
+        title="Not ready for on-site verification"
+        body={`This project is not open for on-site verification yet (SKU ${result.sku}). If logistics has already activated it, refresh and try again — otherwise ask logistics to finish Warehouse scan and activate the project first.`}
         hideNavigation={hideNavigation}
       />
     );

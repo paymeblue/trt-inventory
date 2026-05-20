@@ -19,7 +19,15 @@ import {
   METADATA_PENDING_LOGISTICS,
   METADATA_PENDING_SUPER_ADMIN,
 } from "@/lib/metadata-stages";
-import { queryKeys } from "@/lib/query-keys";
+import { invalidateWorkspaceBadges } from "@/lib/query-keys";
+import {
+  effectiveItemDisplay,
+  effectiveProjectFields,
+  formatPendingPatchSummary,
+  pendingItemChangeMap,
+  type PendingItemChange,
+} from "@/lib/project-pending-patch";
+import { projectLivesOnSite } from "@/lib/project-live";
 import type { OrderStatus, ProjectApprovalStatus, Role } from "@/db/schema";
 
 interface Item {
@@ -86,12 +94,8 @@ function ProjectApprovalBanners({
   project: Project;
   viewerRole: Role;
 }) {
-  const patch =
-    project.pendingPatch && typeof project.pendingPatch === "object"
-      ? (project.pendingPatch as Record<string, unknown>)
-      : null;
-  const patchKeys = patch ? Object.keys(patch) : [];
-  const hasQueuedPatch = patchKeys.length > 0;
+  const patchLines = formatPendingPatchSummary(project.pendingPatch);
+  const hasQueuedPatch = patchLines.length > 0 || project.pendingDeleteRequested;
 
   const statusCopy: Partial<
     Record<ProjectApprovalStatus, { title: string; body: string }>
@@ -165,12 +169,17 @@ function ProjectApprovalBanners({
         className="card border-[color:var(--border)] bg-[color:var(--surface-muted)]/80 p-4"
       >
         <div className="text-sm font-semibold">Updates queued</div>
+        {patchLines.length > 0 ? (
+          <ul className="mt-2 list-inside list-disc text-xs text-[color:var(--text)]">
+            {patchLines.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        ) : null}
         <p className="mt-1 text-xs text-[color:var(--text-muted)]">
-          Edits to name, description, or installer assignment stay staged until the
-          approval chain clears:{" "}
-          <span className="font-medium text-[color:var(--text)]">
-            {patchKeys.join(", ")}
-          </span>
+          {patchLines.length > 0
+            ? "These changes stay staged until the approval chain clears."
+            : "A deletion is staged until the approval chain clears."}
           {stageHint ? (
             <>
               {" "}
@@ -249,6 +258,9 @@ export default function ProjectDetailPage() {
   }
 
   const { project, items, orders, categories } = data;
+  const displayTitle = effectiveProjectFields(project).name;
+  const itemPending = pendingItemChangeMap(project.pendingPatch);
+  const inventoryNeedsApproval = projectLivesOnSite(project.approvalStatus);
   const eligibleForNewOrder = data.eligibleForNewOrder !== false;
   const deleteQueuesApproval =
     project.approvalStatus === "active" ||
@@ -295,7 +307,14 @@ export default function ProjectDetailPage() {
           >
             ← All projects
           </Link>
-          <h1 className="mt-1 text-2xl font-semibold">{project.name}</h1>
+          <h1 className="mt-1 text-2xl font-semibold">
+            {displayTitle}
+            {displayTitle !== project.name ? (
+              <span className="ml-2 text-sm font-normal text-[color:var(--text-muted)]">
+                (live: {project.name})
+              </span>
+            ) : null}
+          </h1>
           {project.description && (
             <p className="max-w-2xl text-sm text-[color:var(--text-muted)]">
               {project.description}
@@ -354,6 +373,8 @@ export default function ProjectDetailPage() {
         items={items}
         categories={categories ?? []}
         canEdit={canManage}
+        needsApproval={inventoryNeedsApproval}
+        itemPending={itemPending}
         onChanged={mutate}
       />
 
@@ -443,7 +464,7 @@ function InstallerAssignmentPanel({
       if (!res.ok) throw new Error(json.error ?? "Update failed");
       if (json.queuedForApproval) setQueued(true);
       await onChanged();
-      await qc.invalidateQueries({ queryKey: queryKeys.approvalsQueueCounts });
+      await invalidateWorkspaceBadges(qc);
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -543,7 +564,7 @@ function CategoriesManageSection({
       setName("");
       setQuantity("1");
       await onChanged();
-      await qc.invalidateQueries({ queryKey: queryKeys.approvalsQueueCounts });
+      await invalidateWorkspaceBadges(qc);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -673,12 +694,16 @@ function ProjectInventorySection({
   items,
   categories,
   canEdit,
+  needsApproval,
+  itemPending,
   onChanged,
 }: {
   projectId: string;
   items: Item[];
   categories: ProjectCategory[];
   canEdit: boolean;
+  needsApproval: boolean;
+  itemPending: Map<string, PendingItemChange>;
   onChanged: () => Promise<unknown>;
 }) {
   const [tab, setTab] = useState<"items" | "categories">("items");
@@ -711,7 +736,9 @@ function ProjectInventorySection({
           </h2>
           <p className="mt-1 text-xs text-[color:var(--text-muted)]">
             {tab === "items"
-              ? "Each physical unit is its own row (unique SKU). Pick a category on the left tab, or use a custom name for one-off parts."
+              ? needsApproval
+                ? "Each unit is its own row. Renames, stock changes, and deletes on active projects go to super-admin, then logistics, before they go live."
+                : "Each physical unit is its own row (unique SKU). Pick a category on the left tab, or use a custom name for one-off parts."
               : "Create reusable labels here. The Items tab only picks from this list so adding stock stays fast in the field."}
           </p>
         </div>
@@ -765,6 +792,8 @@ function ProjectInventorySection({
                       item={i}
                       projectId={projectId}
                       canEdit={canEdit}
+                      needsApproval={needsApproval}
+                      pendingChange={itemPending.get(i.id)}
                       onChanged={onChanged}
                     />
                   ))}
@@ -1086,23 +1115,36 @@ function ItemRow({
   item,
   projectId,
   canEdit,
+  needsApproval,
+  pendingChange,
   onChanged,
 }: {
   item: Item;
   projectId: string;
   canEdit: boolean;
+  needsApproval: boolean;
+  pendingChange?: PendingItemChange;
   onChanged: () => Promise<unknown>;
 }) {
+  const display = effectiveItemDisplay(item, pendingChange);
   const [editing, setEditing] = useState(false);
-  const [name, setName] = useState(item.name);
-  const [sku, setSku] = useState(item.sku);
+  const [name, setName] = useState(display.name);
+  const [sku, setSku] = useState(display.sku);
   const [delta, setDelta] = useState("1");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [queued, setQueued] = useState(false);
+
+  useEffect(() => {
+    const d = effectiveItemDisplay(item, pendingChange);
+    setName(d.name);
+    setSku(d.sku);
+  }, [item, pendingChange]);
 
   async function patch(body: Record<string, unknown>) {
     setBusy(true);
     setError(null);
+    setQueued(false);
     try {
       const res = await fetch(
         `/api/projects/${projectId}/items/${item.id}`,
@@ -1112,8 +1154,12 @@ function ItemRow({
           body: JSON.stringify(body),
         },
       );
-      const json = await res.json();
+      const json = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        queuedForApproval?: boolean;
+      };
       if (!res.ok) throw new Error(json.error ?? "Update failed");
+      if (json.queuedForApproval) setQueued(true);
       await onChanged();
     } catch (err) {
       setError((err as Error).message);
@@ -1122,8 +1168,15 @@ function ItemRow({
     }
   }
 
+  const editDirty =
+    name.trim() !== display.name || sku.trim() !== display.sku;
+
   async function saveEdits() {
-    await patch({ name, sku });
+    if (!editDirty) {
+      setError("Change the name or SKU before saving.");
+      return;
+    }
+    await patch({ name: name.trim(), sku: sku.trim() });
     setEditing(false);
   }
 
@@ -1135,18 +1188,24 @@ function ItemRow({
   }
 
   async function onDelete() {
-    if (!confirm(`Delete item "${item.sku}"? This cannot be undone.`)) return;
+    const msg = needsApproval
+      ? `Request deletion of "${display.sku}"? Super-admin must approve before it is removed.`
+      : `Delete item "${item.sku}"? This cannot be undone.`;
+    if (!confirm(msg)) return;
     setBusy(true);
     setError(null);
+    setQueued(false);
     try {
       const res = await fetch(
         `/api/projects/${projectId}/items/${item.id}`,
         { method: "DELETE" },
       );
-      if (!res.ok) {
-        const json = await res.json().catch(() => ({}));
-        throw new Error(json.error ?? "Delete failed");
-      }
+      const json = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        queuedForApproval?: boolean;
+      };
+      if (!res.ok) throw new Error(json.error ?? "Delete failed");
+      if (json.queuedForApproval) setQueued(true);
       await onChanged();
     } catch (err) {
       setError((err as Error).message);
@@ -1155,7 +1214,7 @@ function ItemRow({
     }
   }
 
-  const negative = item.stockQuantity < 0;
+  const negative = display.stockQuantity < 0;
 
   return (
     <>
@@ -1177,7 +1236,14 @@ function ItemRow({
               onChange={(e) => setSku(e.target.value)}
             />
           ) : (
-            item.sku
+            <span className={display.hasPendingEdit ? "text-[color:var(--info)]" : ""}>
+              {display.sku}
+              {display.hasPendingEdit && display.sku !== item.sku ? (
+                <span className="ml-1 text-[10px] text-[color:var(--text-muted)]">
+                  (was {item.sku})
+                </span>
+              ) : null}
+            </span>
           )}
         </td>
         <td className="px-6 py-3">
@@ -1188,19 +1254,37 @@ function ItemRow({
               onChange={(e) => setName(e.target.value)}
             />
           ) : (
-            item.name
+            <span className={display.hasPendingEdit ? "text-[color:var(--info)]" : ""}>
+              {display.pendingDelete ? (
+                <span className="line-through opacity-70">{item.name}</span>
+              ) : (
+                display.name
+              )}
+              {display.hasPendingEdit && display.name !== item.name ? (
+                <span className="ml-1 text-[10px] text-[color:var(--text-muted)]">
+                  (was {item.name})
+                </span>
+              ) : null}
+            </span>
           )}
         </td>
         <td
           className={`px-6 py-3 text-right font-mono text-base font-semibold ${
             negative
               ? "text-[color:var(--danger)]"
-              : item.stockQuantity === 0
+              : display.stockQuantity === 0
                 ? "text-[color:var(--warning)]"
                 : "text-[color:var(--text)]"
           }`}
         >
-          {item.stockQuantity}
+          {display.stockQuantity}
+          {display.hasPendingEdit &&
+          pendingChange?.delta !== undefined &&
+          pendingChange.delta !== 0 ? (
+            <span className="block text-[10px] font-normal text-[color:var(--text-muted)]">
+              pending
+            </span>
+          ) : null}
         </td>
         {canEdit && (
           <td className="px-6 py-3">
@@ -1208,10 +1292,10 @@ function ItemRow({
               <div className="flex items-center justify-end gap-2">
                 <button
                   onClick={saveEdits}
-                  disabled={busy}
+                  disabled={busy || !editDirty}
                   className="btn btn-primary text-xs"
                 >
-                  Save
+                  {needsApproval ? "Submit" : "Save"}
                 </button>
                 <button
                   onClick={() => {
@@ -1237,18 +1321,25 @@ function ItemRow({
                 />
                 <button
                   onClick={() => restock(1)}
-                  disabled={busy}
+                  disabled={busy || display.pendingDelete}
                   className="btn btn-ghost text-xs"
+                  title={
+                    needsApproval
+                      ? "Queues a stock increase for super-admin approval"
+                      : undefined
+                  }
                 >
                   + add
                 </button>
                 <button
                   onClick={() => restock(-1)}
-                  disabled={busy || item.stockQuantity <= 1}
+                  disabled={busy || display.stockQuantity <= 1 || display.pendingDelete}
                   title={
-                    item.stockQuantity <= 1
+                    display.stockQuantity <= 1
                       ? "Stock cannot go below 1"
-                      : undefined
+                      : needsApproval
+                        ? "Queues a stock decrease for super-admin approval"
+                        : undefined
                   }
                   className="btn btn-ghost text-xs"
                 >
@@ -1256,23 +1347,33 @@ function ItemRow({
                 </button>
                 <button
                   onClick={() => setEditing(true)}
-                  disabled={busy}
+                  disabled={busy || display.pendingDelete}
                   className="btn btn-ghost text-xs"
                 >
                   Edit
                 </button>
                 <button
                   onClick={onDelete}
-                  disabled={busy}
+                  disabled={busy || display.pendingDelete}
                   className="btn btn-ghost text-xs text-[color:var(--danger)]"
                 >
-                  Delete
+                  {needsApproval ? "Request delete" : "Delete"}
                 </button>
               </div>
             )}
           </td>
         )}
       </tr>
+      {queued && (
+        <tr>
+          <td
+            colSpan={canEdit ? 6 : 5}
+            className="px-6 pb-3 text-xs text-[color:var(--info)]"
+          >
+            Submitted for super-admin approval.
+          </td>
+        </tr>
+      )}
       {error && (
         <tr>
           <td

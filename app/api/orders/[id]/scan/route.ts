@@ -61,7 +61,7 @@ async function handlePost(
     if (result.kind === "logistics_not_verified") {
       return jsonError(
         403,
-        `Warehouse verification required for SKU ${result.sku}. Logistics must scan this packing QR in Warehouse scan (Awaiting logistics) before receivers verify on site.`,
+        `On-site verification is not open for SKU ${result.sku} yet. Logistics must finish Warehouse scan for this project before receivers can verify.`,
       );
     }
     if (result.kind === "site_not_configured") {

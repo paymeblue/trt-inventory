@@ -2,9 +2,17 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { and, eq, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { orderItems, orders, products, stockMovements } from "@/db/schema";
+import {
+  orderItems,
+  orders,
+  products,
+  projects,
+  stockMovements,
+} from "@/db/schema";
 import { requireUserAny } from "@/lib/auth-guard";
 import { handleError, jsonError } from "@/lib/api";
+import { projectLivesOnSite } from "@/lib/project-live";
+import { queueItemChangeIfLive } from "@/lib/queue-item-change";
 
 /**
  * Has the given SKU been referenced by any order *inside this project*?
@@ -59,6 +67,11 @@ export async function PATCH(
     const { id: projectId, itemId } = await params;
     const body = patchSchema.parse(await req.json());
 
+    const project = await db.query.projects.findFirst({
+      where: eq(projects.id, projectId),
+    });
+    if (!project) return jsonError(404, "Project not found");
+
     const item = await db.query.products.findFirst({
       where: and(
         eq(products.id, itemId),
@@ -66,6 +79,27 @@ export async function PATCH(
       ),
     });
     if (!item) return jsonError(404, "Item not found in this project");
+
+    if (projectLivesOnSite(project.approvalStatus)) {
+      const queued = await queueItemChangeIfLive(projectId, {
+        itemId,
+        ...(body.name !== undefined ? { name: body.name } : {}),
+        ...(body.sku !== undefined ? { sku: body.sku } : {}),
+        ...(body.delta !== undefined
+          ? { delta: body.delta, reason: body.reason }
+          : {}),
+      });
+      if (!queued.ok) {
+        return jsonError(
+          queued.status ?? 400,
+          queued.error ?? "Could not queue change",
+        );
+      }
+      return NextResponse.json({
+        queuedForApproval: true as const,
+        project: queued.project,
+      });
+    }
 
     if (body.sku && body.sku !== item.sku) {
       if (await isSkuUsedInProject(projectId, item.sku)) {
@@ -138,6 +172,11 @@ export async function DELETE(
   try {
     const { id: projectId, itemId } = await params;
 
+    const project = await db.query.projects.findFirst({
+      where: eq(projects.id, projectId),
+    });
+    if (!project) return jsonError(404, "Project not found");
+
     const item = await db.query.products.findFirst({
       where: and(
         eq(products.id, itemId),
@@ -145,6 +184,23 @@ export async function DELETE(
       ),
     });
     if (!item) return jsonError(404, "Item not found in this project");
+
+    if (projectLivesOnSite(project.approvalStatus)) {
+      const queued = await queueItemChangeIfLive(projectId, {
+        itemId,
+        delete: true,
+      });
+      if (queued.ok) {
+        return NextResponse.json({
+          ok: true,
+          queuedForApproval: true as const,
+          project: queued.project,
+        });
+      }
+      if (queued.status !== null) {
+        return jsonError(queued.status, queued.error ?? "Could not queue delete");
+      }
+    }
 
     if (await isSkuUsedInProject(projectId, item.sku)) {
       return jsonError(

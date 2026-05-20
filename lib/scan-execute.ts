@@ -15,6 +15,7 @@ import {
   isWithinGeofence,
   projectHasGeofence,
 } from "@/lib/geofence";
+import { projectReadyForOnSiteVerification } from "@/lib/project-live";
 import { computeProgress, resolveScan, type ScanOutcome } from "@/lib/scan";
 import type { AuthenticatedActor } from "@/lib/auth-guard";
 
@@ -85,6 +86,7 @@ export async function executeScan({
     const project = await tx.query.projects.findFirst({
       where: eq(projects.id, order.projectId),
       columns: {
+        approvalStatus: true,
         installerUserId: true,
         siteLatitude: true,
         siteLongitude: true,
@@ -122,11 +124,16 @@ export async function executeScan({
       const matched = items.find((i) => i.id === outcome.itemId)!;
       sku = matched.productId;
 
-      const warehouseVerified = await isBarcodeWarehouseVerified(
-        tx,
-        order.projectId,
-        barcode,
-      );
+      const warehouseVerified =
+        project &&
+        projectReadyForOnSiteVerification(project.approvalStatus)
+          ? true
+          : await isBarcodeWarehouseVerified(
+              tx,
+              order.projectId,
+              barcode,
+              sku,
+            );
       if (!warehouseVerified) {
         return {
           kind: "logistics_not_verified",

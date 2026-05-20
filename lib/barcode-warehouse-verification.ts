@@ -1,29 +1,65 @@
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull, sql } from "drizzle-orm";
 import type { db } from "@/db";
 import { orderItems, orders } from "@/db/schema";
 
 type DbLike = Pick<typeof db, "select">;
 
 /**
- * True when any line in the project with this barcode was scanned in the
- * warehouse (logistics gate flow). Receivers reuse the same sticker codes.
+ * True when on-site verification may proceed for this barcode/SKU.
+ *
+ * 1. Same barcode was scanned in the warehouse (gate order line), or
+ * 2. SKU pool: warehouse has verified more gate units than on-site scans
+ *    already consumed for that SKU (delivery orders use new barcodes per line).
  */
 export async function isBarcodeWarehouseVerified(
   tx: DbLike,
   projectId: string,
   barcode: string,
+  sku: string,
 ): Promise<boolean> {
-  const [row] = await tx
+  const [exact] = await tx
     .select({ id: orderItems.id })
     .from(orderItems)
     .innerJoin(orders, eq(orders.id, orderItems.orderId))
     .where(
       and(
         eq(orders.projectId, projectId),
-        eq(orderItems.barcode, barcode),
+        sql`lower(${orderItems.barcode}) = lower(${barcode})`,
         isNotNull(orderItems.logisticsScannedAt),
       ),
     )
     .limit(1);
-  return Boolean(row);
+  if (exact) return true;
+
+  const [{ warehouseCount }] = await tx
+    .select({
+      warehouseCount: sql<number>`count(*)::int`,
+    })
+    .from(orderItems)
+    .innerJoin(orders, eq(orders.id, orderItems.orderId))
+    .where(
+      and(
+        eq(orders.projectId, projectId),
+        eq(orders.isLogisticsGate, true),
+        eq(orderItems.productId, sku),
+        isNotNull(orderItems.logisticsScannedAt),
+      ),
+    );
+
+  const [{ siteCount }] = await tx
+    .select({
+      siteCount: sql<number>`count(*)::int`,
+    })
+    .from(orderItems)
+    .innerJoin(orders, eq(orders.id, orderItems.orderId))
+    .where(
+      and(
+        eq(orders.projectId, projectId),
+        eq(orders.isLogisticsGate, false),
+        eq(orderItems.productId, sku),
+        isNotNull(orderItems.scannedAt),
+      ),
+    );
+
+  return (warehouseCount ?? 0) > (siteCount ?? 0);
 }

@@ -143,9 +143,7 @@ export default function OrderDetailPage({
   if (!user) return null;
 
   if (orderQuery.isPending) {
-    return (
-      <PageLoading message="Loading order…" />
-    );
+    return <PageLoading message="Loading order…" />;
   }
 
   if (orderQuery.isError || !orderQuery.data) {
@@ -1326,14 +1324,14 @@ function ItemCard({
         )}
       </div>
 
-      {showRemove && !done && (
+      {/* {showRemove && !done && (
         <button
           onClick={() => onRemove?.(item.id)}
           className="no-print btn btn-ghost self-end text-xs"
         >
           Remove
         </button>
-      )}
+      )} */}
     </li>
   );
 }

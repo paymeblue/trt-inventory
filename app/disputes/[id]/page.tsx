@@ -10,6 +10,7 @@ import type {
   DisputeStatus,
 } from "@/db/schema";
 import { fetchJson } from "@/lib/fetch-json";
+import { invalidateDisputeQueries, queryKeys } from "@/lib/query-keys";
 import { formatEventTypeLabel } from "@/lib/dispute-labels";
 import { isDisputeMessagingOpen } from "@/lib/dispute-resolution";
 import { useAuthedUser } from "@/components/session-context";
@@ -58,7 +59,7 @@ export default function DisputeDetailPage() {
   const [body, setBody] = useState("");
 
   const threadQuery = useQuery({
-    queryKey: ["disputes", "detail", id],
+    queryKey: queryKeys.disputeDetail(id!),
     queryFn: () =>
       fetchJson<{
         dispute: DisputePayload;
@@ -66,7 +67,7 @@ export default function DisputeDetailPage() {
         events: EventPayload[];
       }>(`/api/disputes/${id}`),
     enabled: !!user && !!id,
-    refetchInterval: 5_000,
+    staleTime: 0,
   });
 
   const sendMessage = useMutation({
@@ -83,8 +84,7 @@ export default function DisputeDetailPage() {
     },
     onSuccess: async () => {
       setBody("");
-      await qc.invalidateQueries({ queryKey: ["disputes", "detail", id] });
-      await qc.invalidateQueries({ queryKey: ["disputes", "list"] });
+      if (id) await invalidateDisputeQueries(qc, id);
     },
   });
 

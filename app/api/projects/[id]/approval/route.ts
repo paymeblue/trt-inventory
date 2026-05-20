@@ -7,6 +7,7 @@ import { requireUserAny } from "@/lib/auth-guard";
 import { generateBarcode } from "@/lib/barcode";
 import { handleError, jsonError } from "@/lib/api";
 import { applyPendingCategoryAdds } from "@/lib/apply-pending-category-adds";
+import { applyPendingItemChanges } from "@/lib/apply-pending-item-changes";
 import { ensureLogisticsGateOrder } from "@/lib/logistics-gate-order";
 import {
   METADATA_PENDING_LOGISTICS,
@@ -278,6 +279,13 @@ export async function POST(
             projectId: id,
             userId: auth.actor.userId,
             adds: patch.categoryAdds,
+          });
+        }
+        if (patch?.itemChanges?.length) {
+          await applyPendingItemChanges(tx, {
+            projectId: id,
+            userId: auth.actor.userId,
+            changes: patch.itemChanges,
           });
         }
         const [proj] = await tx

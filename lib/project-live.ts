@@ -14,3 +14,10 @@ export function projectMetadataMustQueue(
   if (role === "super_admin") return projectLivesOnSite(approvalStatus);
   return role === "pm" && projectLivesOnSite(approvalStatus);
 }
+
+/** Logistics already cleared the warehouse at activation — receivers may scan. */
+export function projectReadyForOnSiteVerification(
+  approvalStatus: ProjectApprovalStatus,
+): boolean {
+  return approvalStatus === "active";
+}

@@ -1,20 +1,22 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AddressPicker,
   type SiteSelection,
 } from "@/components/address-picker";
-import { queryKeys } from "@/lib/query-keys";
+import { invalidateWorkspaceBadges } from "@/lib/query-keys";
 import type { ProjectApprovalStatus } from "@/db/schema";
 import { projectLivesOnSite } from "@/lib/project-live";
+import { effectiveProjectFields } from "@/lib/project-pending-patch";
 
 type ProjectRow = {
   id: string;
   name: string;
   description: string | null;
   approvalStatus: ProjectApprovalStatus;
+  pendingPatch: unknown;
   siteAddress: string | null;
   siteLatitude: number | null;
   siteLongitude: number | null;
@@ -30,15 +32,21 @@ export function ProjectEditPanel({
 }) {
   const qc = useQueryClient();
   const livesOnSite = projectLivesOnSite(project.approvalStatus);
+  const effective = useMemo(
+    () => effectiveProjectFields(project),
+    [project],
+  );
 
-  const [name, setName] = useState(project.name);
-  const [description, setDescription] = useState(project.description ?? "");
+  const [name, setName] = useState(effective.name);
+  const [description, setDescription] = useState(effective.description ?? "");
   const [site, setSite] = useState<SiteSelection | null>(
-    project.siteLatitude != null && project.siteLongitude != null && project.siteAddress
+    effective.siteLatitude != null &&
+      effective.siteLongitude != null &&
+      effective.siteAddress
       ? {
-          siteAddress: project.siteAddress,
-          siteLatitude: project.siteLatitude,
-          siteLongitude: project.siteLongitude,
+          siteAddress: effective.siteAddress,
+          siteLatitude: effective.siteLatitude,
+          siteLongitude: effective.siteLongitude,
         }
       : null,
   );
@@ -47,48 +55,69 @@ export function ProjectEditPanel({
   const [queued, setQueued] = useState(false);
 
   useEffect(() => {
-    setName(project.name);
-    setDescription(project.description ?? "");
+    const next = effectiveProjectFields(project);
+    setName(next.name);
+    setDescription(next.description ?? "");
     setSite(
-      project.siteLatitude != null &&
-        project.siteLongitude != null &&
-        project.siteAddress
+      next.siteLatitude != null &&
+        next.siteLongitude != null &&
+        next.siteAddress
         ? {
-            siteAddress: project.siteAddress,
-            siteLatitude: project.siteLatitude,
-            siteLongitude: project.siteLongitude,
+            siteAddress: next.siteAddress,
+            siteLatitude: next.siteLatitude,
+            siteLongitude: next.siteLongitude,
           }
         : null,
     );
   }, [project]);
 
+  const hasChanges = useMemo(() => {
+    const descTrim = description.trim();
+    const prevDesc = (effective.description ?? "").trim();
+    const siteChanged =
+      !!site &&
+      (site.siteAddress !== (effective.siteAddress ?? "") ||
+        site.siteLatitude !== effective.siteLatitude ||
+        site.siteLongitude !== effective.siteLongitude);
+    const siteCleared =
+      !site &&
+      (effective.siteAddress != null ||
+        effective.siteLatitude != null ||
+        effective.siteLongitude != null);
+    return (
+      name.trim() !== effective.name ||
+      descTrim !== prevDesc ||
+      siteChanged ||
+      siteCleared
+    );
+  }, [name, description, site, effective]);
+
   async function save(e: React.FormEvent) {
     e.preventDefault();
+    if (!hasChanges) {
+      setErr("Change the title, description, or site before saving.");
+      return;
+    }
     setBusy(true);
     setErr(null);
     setQueued(false);
     try {
       const payload: Record<string, unknown> = {};
-      if (name.trim() !== project.name) payload.name = name.trim();
+      if (name.trim() !== effective.name) payload.name = name.trim();
       const descTrim = description.trim();
-      const prevDesc = project.description ?? "";
+      const prevDesc = (effective.description ?? "").trim();
       if (descTrim !== prevDesc) {
         payload.description = descTrim.length ? descTrim : null;
       }
       const siteChanged =
         site &&
-        (site.siteAddress !== project.siteAddress ||
-          site.siteLatitude !== project.siteLatitude ||
-          site.siteLongitude !== project.siteLongitude);
+        (site.siteAddress !== (effective.siteAddress ?? "") ||
+          site.siteLatitude !== effective.siteLatitude ||
+          site.siteLongitude !== effective.siteLongitude);
       if (siteChanged && site) {
         payload.siteAddress = site.siteAddress;
         payload.siteLatitude = site.siteLatitude;
         payload.siteLongitude = site.siteLongitude;
-      }
-
-      if (Object.keys(payload).length === 0) {
-        setErr("Change the title, description, or site before saving.");
-        return;
       }
 
       const res = await fetch(`/api/projects/${project.id}`, {
@@ -103,7 +132,7 @@ export function ProjectEditPanel({
       if (!res.ok) throw new Error(json.error ?? "Update failed");
       if (json.queuedForApproval) setQueued(true);
       await onChanged();
-      await qc.invalidateQueries({ queryKey: queryKeys.approvalsQueueCounts });
+      await invalidateWorkspaceBadges(qc);
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -146,7 +175,11 @@ export function ProjectEditPanel({
         </label>
         <AddressPicker value={site} onChange={setSite} required={false} />
         <div className="flex flex-wrap items-center gap-2">
-          <button type="submit" className="btn btn-primary" disabled={busy}>
+          <button
+            type="submit"
+            className="btn btn-primary"
+            disabled={busy || !hasChanges}
+          >
             {busy ? "Saving…" : livesOnSite ? "Submit for approval" : "Save"}
           </button>
         </div>
