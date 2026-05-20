@@ -35,9 +35,13 @@ export interface ScanComputationResult {
  * is marked anomaly. Once all items have been scanned, the order flips to
  * fulfilled.
  */
+function barcodeEquals(a: string, b: string): boolean {
+  return a.trim().toUpperCase() === b.trim().toUpperCase();
+}
+
 export function resolveScan(input: ScanComputationInput): ScanComputationResult {
   const { barcode, items, orderStatus } = input;
-  const match = items.find((i) => i.barcode === barcode);
+  const match = items.find((i) => barcodeEquals(i.barcode, barcode));
 
   if (!match) {
     return {

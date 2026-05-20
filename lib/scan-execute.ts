@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { and, eq, gte, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   orderItems,
@@ -106,7 +106,8 @@ export async function executeScan({
 
     await tx.execute(sql`
       SELECT id FROM order_items
-      WHERE order_id = ${orderId}::uuid AND barcode = ${barcode}
+      WHERE order_id = ${orderId}::uuid
+        AND lower(barcode) = lower(${barcode})
       FOR UPDATE
     `);
 
@@ -287,33 +288,5 @@ export async function executeScan({
   return result;
 }
 
-/**
- * Resolves a bare barcode to the order_item it belongs to. Used by the
- * deep-link `/s/[barcode]` route so a phone camera QR scan can find the
- * right order without the user knowing the order id.
- *
- * Returns the item + its order + the parent project name, or null if
- * the barcode doesn't exist. Does NOT filter by order status — the
- * caller decides what to do with fulfilled orders.
- */
-export async function findOrderByBarcode(barcode: string) {
-  const [row] = await db
-    .select({
-      itemId: orderItems.id,
-      itemBarcode: orderItems.barcode,
-      itemScannedAt: orderItems.scannedAt,
-      orderId: orders.id,
-      orderStatus: orders.status,
-      orderIsLogisticsGate: orders.isLogisticsGate,
-      projectId: orders.projectId,
-      projectName: projects.name,
-      projectApprovalStatus: projects.approvalStatus,
-    })
-    .from(orderItems)
-    .innerJoin(orders, eq(orders.id, orderItems.orderId))
-    .innerJoin(projects, eq(projects.id, orders.projectId))
-    .where(eq(orderItems.barcode, barcode))
-    .orderBy(desc(orders.isLogisticsGate))
-    .limit(1);
-  return row ?? null;
-}
+export { findOrderByBarcode, resolveOnSiteScanTarget } from "@/lib/resolve-onsite-scan";
+export type { OnSiteScanTarget } from "@/lib/resolve-onsite-scan";

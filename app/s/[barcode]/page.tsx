@@ -7,7 +7,14 @@ import { verifyPrintedScanToken } from '@/lib/printed-scan-token';
 import { runPageWithObservability } from '@/lib/observability/instrument';
 import { findLogisticsGateOrderId } from '@/lib/logistics-gate-order';
 import { executeLogisticsScan } from '@/lib/logistics-scan-execute';
-import { executeScan, findOrderByBarcode } from '@/lib/scan-execute';
+import { executeScan } from '@/lib/scan-execute';
+import {
+  findOrderByBarcode,
+  findDeliveryLineForSku,
+  findRowsByBarcode,
+  resolveOnSiteScanTarget,
+} from '@/lib/resolve-onsite-scan';
+import { projectReadyForOnSiteVerification } from '@/lib/project-live';
 import type { ScanOutcome } from '@/lib/scan';
 
 export const dynamic = 'force-dynamic';
@@ -138,8 +145,29 @@ async function scanDeepLinkInner(
   const isAnonymousPhoneScan = actor.isPrintedScan === true;
   const hideNavigation = isAnonymousPhoneScan;
 
-  const lookup = await findOrderByBarcode(barcode);
-  if (!lookup) {
+  const target = await resolveOnSiteScanTarget(barcode);
+  if (!target) {
+    const rows = await findRowsByBarcode(barcode);
+    const gate = rows.find((r) => r.orderIsLogisticsGate);
+    if (
+      gate &&
+      projectReadyForOnSiteVerification(gate.projectApprovalStatus)
+    ) {
+      const open = await findDeliveryLineForSku(
+        gate.projectId,
+        gate.productId,
+      );
+      if (!open) {
+        return (
+          <OutcomeShell
+            status="blocked"
+            title="No delivery order yet"
+            body={`This warehouse sticker (SKU ${gate.productId}) is verified, but your PM has not created a delivery order for "${gate.projectName}" yet. Ask them to create one, then scan the same sticker again on site.`}
+            hideNavigation={hideNavigation}
+          />
+        );
+      }
+    }
     return (
       <OutcomeShell
         status="blocked"
@@ -152,10 +180,10 @@ async function scanDeepLinkInner(
 
   const orderHref = isAnonymousPhoneScan
     ? undefined
-    : `/orders/${lookup.orderId}`;
+    : `/orders/${target.orderId}`;
 
-  if (lookup.projectApprovalStatus === 'pending_logistics') {
-    const gateOrderId = await findLogisticsGateOrderId(lookup.projectId);
+  if (target.projectApprovalStatus === 'pending_logistics') {
+    const gateOrderId = await findLogisticsGateOrderId(target.projectId);
     if (!gateOrderId) {
       return (
         <OutcomeShell
@@ -219,8 +247,8 @@ async function scanDeepLinkInner(
   }
 
   const result = await executeScan({
-    orderId: lookup.orderId,
-    barcode,
+    orderId: target.orderId,
+    barcode: target.itemBarcode,
     actor,
   });
 
@@ -238,8 +266,8 @@ async function scanDeepLinkInner(
     return (
       <OutcomeShell
         status="blocked"
-        title="Warehouse verification only"
-        body="This QR belongs to the logistics warehouse checklist, not a delivery order. Receivers fulfill PM orders on site after logistics activates the project."
+        title="Use a delivery order sticker"
+        body="This scan target is still the warehouse checklist. Open the PM delivery order for this project and scan a line there, or scan the same warehouse sticker after a delivery order exists."
         hideNavigation={hideNavigation}
       />
     );
@@ -249,7 +277,7 @@ async function scanDeepLinkInner(
       <OutcomeShell
         status="done"
         title="Order already fulfilled"
-        body={`Order "${lookup.projectName}" was already completed. Nothing was changed.`}
+        body={`Order "${target.projectName}" was already completed. Nothing was changed.`}
         orderHref={orderHref}
         hideNavigation={hideNavigation}
       />
@@ -351,10 +379,15 @@ async function scanDeepLinkInner(
   return (
     <OutcomeView
       outcome={result.outcome}
-      projectName={lookup.projectName}
+      projectName={target.projectName}
       orderHref={orderHref}
       stock={result.stock}
       progress={result.progress}
+      gateStickerNote={
+        target.matchedViaGateSticker
+          ? "Warehouse packing sticker accepted — applied to your open delivery order line for this SKU."
+          : undefined
+      }
       hideNavigation={hideNavigation}
     />
   );
@@ -366,6 +399,7 @@ function OutcomeView({
   orderHref,
   stock,
   progress,
+  gateStickerNote,
   hideNavigation,
 }: {
   outcome: ScanOutcome;
@@ -373,6 +407,7 @@ function OutcomeView({
   orderHref?: string;
   stock?: { sku: string; stockQuantity: number };
   progress: { scanned: number; total: number; percent: number };
+  gateStickerNote?: string;
   hideNavigation?: boolean;
 }) {
   if (outcome.result === 'valid') {
@@ -380,11 +415,11 @@ function OutcomeView({
     return (
       <OutcomeShell
         status={done ? 'complete' : 'ok'}
-        title={done ? 'Order resolved' : 'Item acknowledged'}
+        title={done ? 'Order fulfilled' : 'Item verified'}
         body={
           done
-            ? `Every item on "${projectName}" has been scanned. The order is now marked fulfilled and the project's item stock is up to date.`
-            : `Scan recorded on "${projectName}". ${progress.scanned}/${progress.total} items verified (${progress.percent}%).`
+            ? `Every item on "${projectName}" has been scanned. The delivery order is fulfilled and stock is updated.`
+            : `Scan recorded on "${projectName}". ${progress.scanned}/${progress.total} items verified (${progress.percent}%).${gateStickerNote ? ` ${gateStickerNote}` : ''}`
         }
         stock={stock}
         orderHref={orderHref}
