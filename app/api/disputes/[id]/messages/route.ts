@@ -5,6 +5,8 @@ import { db } from "@/db";
 import { disputeMessages, disputes, orders, projects } from "@/db/schema";
 import { requireUser } from "@/lib/auth-guard";
 import { handleError, jsonError } from "@/lib/api";
+import { recordDisputeEvent } from "@/lib/dispute-events";
+import { isDisputeMessagingOpen } from "@/lib/dispute-resolution";
 import {
   disputeOrderScopeProject,
   disputesVisibleWhere,
@@ -56,6 +58,17 @@ export async function POST(
     );
     if (!ok) return jsonError(404, "Dispute not found");
 
+    const disputeRow = await db.query.disputes.findFirst({
+      where: eq(disputes.id, disputeId),
+      columns: { status: true },
+    });
+    if (!disputeRow || !isDisputeMessagingOpen(disputeRow.status)) {
+      return jsonError(
+        403,
+        "This dispute is closed for new messages. Reopen the case to continue the conversation.",
+      );
+    }
+
     const parsed = schema.parse(await req.json());
     const [row] = await db
       .insert(disputeMessages)
@@ -70,6 +83,13 @@ export async function POST(
       .update(disputes)
       .set({ updatedAt: new Date() })
       .where(eq(disputes.id, disputeId));
+
+    await recordDisputeEvent({
+      disputeId,
+      userId: auth.actor.userId,
+      eventType: "message_posted",
+      detail: { messageId: row?.id },
+    });
 
     return NextResponse.json({ message: row }, { status: 201 });
   } catch (err) {

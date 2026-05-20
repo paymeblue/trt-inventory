@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { disputes, projects } from "@/db/schema";
 import { requireUser } from "@/lib/auth-guard";
@@ -37,9 +37,16 @@ export async function GET() {
       .from(projects)
       .where(eq(projects.metadataChangeStage, METADATA_PENDING_LOGISTICS));
 
-    const [{ disputesTotal }] = await db
-      .select({ disputesTotal: sql<number>`count(*)::int` })
-      .from(disputes);
+    const [{ disputesOpen }] = await db
+      .select({ disputesOpen: sql<number>`count(*)::int` })
+      .from(disputes)
+      .where(
+        inArray(disputes.status, [
+          "open",
+          "under_review",
+          "awaiting_response",
+        ]),
+      );
 
     const nSa = (saNew ?? 0) + (saMeta ?? 0);
     const nLog = (logisticsNew ?? 0) + (logisticsMeta ?? 0);
@@ -47,14 +54,14 @@ export async function GET() {
     return NextResponse.json({
       superAdminProjects: nSa,
       logisticsProjects: nLog,
-      /** All dispute threads (super-admin triage — badge on Disputes nav). */
-      superAdminDisputes: disputesTotal ?? 0,
+      /** Open disputes needing triage (badge on Disputes nav). */
+      superAdminDisputes: disputesOpen ?? 0,
       breakdown: {
         newPendingSuperAdmin: saNew ?? 0,
         updatesPendingSuperAdmin: saMeta ?? 0,
         newPendingLogistics: logisticsNew ?? 0,
         updatesPendingLogistics: logisticsMeta ?? 0,
-        disputesTotal: disputesTotal ?? 0,
+        disputesOpen: disputesOpen ?? 0,
       },
     });
   } catch (err) {

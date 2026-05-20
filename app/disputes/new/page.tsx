@@ -7,6 +7,13 @@ import { useMemo, useState } from "react";
 import useSWR from "@/lib/swr";
 import { useAuthedUser } from "@/components/session-context";
 import { queryKeys } from "@/lib/query-keys";
+import {
+  DISPUTE_CATEGORY_OPTIONS,
+  DISPUTE_PRIORITY_OPTIONS,
+  disputeCategoryLabel,
+  disputePriorityLabel,
+} from "@/lib/dispute-labels";
+import type { DisputeCategory, DisputePriority } from "@/db/schema";
 
 interface ProjectLite {
   id: string;
@@ -37,6 +44,8 @@ export default function NewDisputePage() {
   const [projectId, setProjectId] = useState("");
   const [orderId, setOrderId] = useState("");
   const [photo, setPhoto] = useState<File | null>(null);
+  const [category, setCategory] = useState<DisputeCategory | "">("");
+  const [priority, setPriority] = useState<DisputePriority>("normal");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -86,6 +95,8 @@ export default function NewDisputePage() {
       if (pid) fd.set("projectId", pid);
       if (oid) fd.set("orderId", oid);
       if (photo) fd.set("photo", photo);
+      if (category) fd.set("category", category);
+      fd.set("priority", priority);
       const res = await fetch("/api/disputes", { method: "POST", body: fd });
       const json = (await res.json().catch(() => ({}))) as {
         error?: string;
@@ -145,6 +156,45 @@ export default function NewDisputePage() {
             maxLength={200}
           />
         </label>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="block">
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
+              Category
+            </span>
+            <select
+              className="input w-full"
+              value={category}
+              onChange={(e) =>
+                setCategory(e.target.value as DisputeCategory | "")
+              }
+            >
+              <option value="">Select…</option>
+              {DISPUTE_CATEGORY_OPTIONS.map((c) => (
+                <option key={c} value={c}>
+                  {disputeCategoryLabel(c)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
+              Priority
+            </span>
+            <select
+              className="input w-full"
+              value={priority}
+              onChange={(e) =>
+                setPriority(e.target.value as DisputePriority)
+              }
+            >
+              {DISPUTE_PRIORITY_OPTIONS.map((p) => (
+                <option key={p} value={p}>
+                  {disputePriorityLabel(p)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
         <label className="block">
           <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
             What went wrong?

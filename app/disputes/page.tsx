@@ -5,6 +5,13 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/fetch-json";
 import { useAuthedUser } from "@/components/session-context";
 import { PageLoading } from "@/components/page-loading";
+import {
+  disputeCategoryLabel,
+  disputePriorityLabel,
+  disputeStatusLabel,
+  disputeStatusPill,
+} from "@/lib/dispute-labels";
+import type { DisputeCategory, DisputePriority, DisputeStatus } from "@/db/schema";
 
 interface DisputeListRow {
   id: string;
@@ -15,6 +22,9 @@ interface DisputeListRow {
   orderId: string | null;
   photoPath: string | null;
   creatorName: string | null;
+  status: DisputeStatus;
+  category: DisputeCategory | null;
+  priority: DisputePriority;
 }
 
 export default function DisputesListPage() {
@@ -36,9 +46,8 @@ export default function DisputesListPage() {
         <div>
           <h1 className="text-2xl font-semibold">Disputes</h1>
           <p className="max-w-xl text-sm text-[color:var(--text-muted)]">
-            Raise issues with the right stakeholders. Messages sync on a short
-            refresh cycle so everyone stays aligned—even when the handheld floor
-            network is flaky.
+            Formal dispute records with status workflow, audit trail, and PDF or
+            Word export for evidence. Logistics and super-admin triage open cases.
           </p>
         </div>
         <Link href="/disputes/new" className="btn btn-primary self-start">
@@ -75,9 +84,14 @@ export default function DisputesListPage() {
               >
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="font-semibold">{d.title}</div>
-                  <span className="text-xs text-[color:var(--text-muted)]">
-                    {new Date(d.createdAt).toLocaleString()}
-                  </span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`${disputeStatusPill(d.status)} text-[10px]`}>
+                      {disputeStatusLabel(d.status)}
+                    </span>
+                    <span className="text-xs text-[color:var(--text-muted)]">
+                      {new Date(d.createdAt).toLocaleString()}
+                    </span>
+                  </div>
                 </div>
                 <p className="mt-1 line-clamp-2 text-xs text-[color:var(--text-muted)]">
                   {d.description}
@@ -86,6 +100,8 @@ export default function DisputesListPage() {
                   {d.creatorName ? (
                     <span>Opened by {d.creatorName}</span>
                   ) : null}
+                  <span>{disputeCategoryLabel(d.category)}</span>
+                  <span>{disputePriorityLabel(d.priority)} priority</span>
                   {d.projectId ? (
                     <Link
                       href={`/projects/${d.projectId}`}

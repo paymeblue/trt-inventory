@@ -38,6 +38,33 @@ export const projectApprovalStatusEnum = pgEnum("project_approval_status", [
 export type ProjectApprovalStatus =
   (typeof projectApprovalStatusEnum.enumValues)[number];
 
+export const disputeStatusEnum = pgEnum("dispute_status", [
+  "open",
+  "under_review",
+  "awaiting_response",
+  "resolved",
+  "closed",
+]);
+export type DisputeStatus = (typeof disputeStatusEnum.enumValues)[number];
+
+export const disputeCategoryEnum = pgEnum("dispute_category", [
+  "delivery_shortage",
+  "wrong_item",
+  "damaged_goods",
+  "scan_verification",
+  "documentation",
+  "other",
+]);
+export type DisputeCategory = (typeof disputeCategoryEnum.enumValues)[number];
+
+export const disputePriorityEnum = pgEnum("dispute_priority", [
+  "low",
+  "normal",
+  "high",
+  "urgent",
+]);
+export type DisputePriority = (typeof disputePriorityEnum.enumValues)[number];
+
 export const users = pgTable(
   "users",
   {
@@ -254,7 +281,7 @@ export const stockMovements = pgTable("stock_movements", {
     .notNull(),
 });
 
-/** Escalation thread with optional screenshot; messages polled from the UI. */
+/** Escalation thread with optional screenshot; formal resolution workflow. */
 export const disputes = pgTable("disputes", {
   id: uuid("id").defaultRandom().primaryKey(),
   createdById: uuid("created_by_id")
@@ -269,10 +296,36 @@ export const disputes = pgTable("disputes", {
   title: text("title").notNull(),
   description: text("description").notNull(),
   photoPath: text("photo_path"),
+  status: disputeStatusEnum("status").notNull().default("open"),
+  category: disputeCategoryEnum("category"),
+  priority: disputePriorityEnum("priority").notNull().default("normal"),
+  assignedToId: uuid("assigned_to_id").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  resolutionSummary: text("resolution_summary"),
+  resolvedById: uuid("resolved_by_id").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  closedAt: timestamp("closed_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+/** Immutable audit trail for dispute lifecycle (export + accountability). */
+export const disputeEvents = pgTable("dispute_events", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  disputeId: uuid("dispute_id")
+    .notNull()
+    .references(() => disputes.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+  eventType: text("event_type").notNull(),
+  detail: jsonb("detail"),
+  createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
 });
@@ -296,6 +349,16 @@ export const disputesRelations = relations(disputes, ({ one, many }) => ({
     fields: [disputes.createdById],
     references: [users.id],
   }),
+  assignee: one(users, {
+    fields: [disputes.assignedToId],
+    references: [users.id],
+    relationName: "disputeAssignee",
+  }),
+  resolver: one(users, {
+    fields: [disputes.resolvedById],
+    references: [users.id],
+    relationName: "disputeResolver",
+  }),
   project: one(projects, {
     fields: [disputes.projectId],
     references: [projects.id],
@@ -305,6 +368,18 @@ export const disputesRelations = relations(disputes, ({ one, many }) => ({
     references: [orders.id],
   }),
   messages: many(disputeMessages),
+  events: many(disputeEvents),
+}));
+
+export const disputeEventsRelations = relations(disputeEvents, ({ one }) => ({
+  dispute: one(disputes, {
+    fields: [disputeEvents.disputeId],
+    references: [disputes.id],
+  }),
+  actor: one(users, {
+    fields: [disputeEvents.userId],
+    references: [users.id],
+  }),
 }));
 
 export const disputeMessagesRelations = relations(disputeMessages, ({ one }) => ({
@@ -402,5 +477,6 @@ export type NewOrder = typeof orders.$inferInsert;
 export type OrderItem = typeof orderItems.$inferSelect;
 export type Dispute = typeof disputes.$inferSelect;
 export type DisputeMessage = typeof disputeMessages.$inferSelect;
+export type DisputeEvent = typeof disputeEvents.$inferSelect;
 export type NewOrderItem = typeof orderItems.$inferInsert;
 export type StockMovement = typeof stockMovements.$inferSelect;

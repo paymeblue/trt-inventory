@@ -11,6 +11,7 @@ import {
   disputeOrderScopeProject,
   disputesVisibleWhere,
 } from "@/lib/dispute-access";
+import { recordDisputeEvent } from "@/lib/dispute-events";
 
 const DISPUTE_UPLOAD_REL = ".data/dispute-photos";
 
@@ -20,6 +21,17 @@ const createJsonSchema = z
     description: z.string().trim().min(1).max(8000),
     projectId: z.string().uuid().nullable().optional(),
     orderId: z.string().uuid().nullable().optional(),
+    category: z
+      .enum([
+        "delivery_shortage",
+        "wrong_item",
+        "damaged_goods",
+        "scan_verification",
+        "documentation",
+        "other",
+      ])
+      .optional(),
+    priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
   })
   .refine((x) => Boolean(x.projectId) || Boolean(x.orderId), {
     message: "Link at least a project or an order",
@@ -59,6 +71,12 @@ export async function GET() {
         photoPath: disputes.photoPath,
         projectId: disputes.projectId,
         orderId: disputes.orderId,
+        status: disputes.status,
+        category: disputes.category,
+        priority: disputes.priority,
+        assignedToId: disputes.assignedToId,
+        resolvedAt: disputes.resolvedAt,
+        closedAt: disputes.closedAt,
         createdAt: disputes.createdAt,
         createdById: disputes.createdById,
         creatorName: users.name,
@@ -93,6 +111,10 @@ export async function POST(req: NextRequest) {
     let projectId: string | null = null;
     let orderId: string | null = null;
     let photoFile: File | null = null;
+    let category:
+      | z.infer<typeof createJsonSchema>["category"]
+      | undefined;
+    let priority: z.infer<typeof createJsonSchema>["priority"] | undefined;
 
     if (ct.includes("multipart/form-data")) {
       const raw = await req.formData();
@@ -110,12 +132,31 @@ export async function POST(req: NextRequest) {
         typeof File !== "undefined" && f instanceof File && f.size > 0
           ? f
           : null;
+      const cat = formData.get("category");
+      const pri = formData.get("priority");
+      const catParsed = z
+        .enum([
+          "delivery_shortage",
+          "wrong_item",
+          "damaged_goods",
+          "scan_verification",
+          "documentation",
+          "other",
+        ])
+        .safeParse(cat);
+      if (catParsed.success) category = catParsed.data;
+      const priParsed = z
+        .enum(["low", "normal", "high", "urgent"])
+        .safeParse(pri);
+      if (priParsed.success) priority = priParsed.data;
     } else {
       const body = createJsonSchema.parse(await req.json());
       title = body.title;
       description = body.description;
       projectId = body.projectId ?? null;
       orderId = body.orderId ?? null;
+      category = body.category;
+      priority = body.priority;
     }
 
     if (!title || !description) {
@@ -172,10 +213,24 @@ export async function POST(req: NextRequest) {
         projectId,
         orderId,
         photoPath,
+        category: category ?? null,
+        priority: priority ?? "normal",
+        status: "open",
       })
       .returning();
 
     if (!created) return jsonError(500, "Failed to create dispute");
+
+    await recordDisputeEvent({
+      disputeId: created.id,
+      userId: auth.actor.userId,
+      eventType: "created",
+      detail: {
+        title,
+        category: category ?? null,
+        priority: priority ?? "normal",
+      },
+    });
 
     if (photoFile) {
       const absDir = join(process.cwd(), DISPUTE_UPLOAD_REL);

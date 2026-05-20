@@ -4,9 +4,17 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type {
+  DisputeCategory,
+  DisputePriority,
+  DisputeStatus,
+} from "@/db/schema";
 import { fetchJson } from "@/lib/fetch-json";
+import { formatEventTypeLabel } from "@/lib/dispute-labels";
+import { isDisputeMessagingOpen } from "@/lib/dispute-resolution";
 import { useAuthedUser } from "@/components/session-context";
 import { PageLoading } from "@/components/page-loading";
+import { DisputeResolutionPanel } from "@/components/dispute-resolution-panel";
 
 interface DisputePayload {
   id: string;
@@ -15,6 +23,12 @@ interface DisputePayload {
   photoPath: string | null;
   projectId: string | null;
   orderId: string | null;
+  status: DisputeStatus;
+  category: DisputeCategory | null;
+  priority: DisputePriority;
+  assignedToId: string | null;
+  resolutionSummary: string | null;
+  assigneeName: string | null;
   createdAt: string;
   createdById: string;
   creatorName: string | null;
@@ -28,6 +42,14 @@ interface MessagePayload {
   authorName: string | null;
 }
 
+interface EventPayload {
+  id: string;
+  eventType: string;
+  detail: unknown;
+  createdAt: string;
+  actorName: string | null;
+}
+
 export default function DisputeDetailPage() {
   const params = useParams<{ id: string }>();
   const user = useAuthedUser();
@@ -38,9 +60,11 @@ export default function DisputeDetailPage() {
   const threadQuery = useQuery({
     queryKey: ["disputes", "detail", id],
     queryFn: () =>
-      fetchJson<{ dispute: DisputePayload; messages: MessagePayload[] }>(
-        `/api/disputes/${id}`,
-      ),
+      fetchJson<{
+        dispute: DisputePayload;
+        messages: MessagePayload[];
+        events: EventPayload[];
+      }>(`/api/disputes/${id}`),
     enabled: !!user && !!id,
     refetchInterval: 5_000,
   });
@@ -77,6 +101,9 @@ export default function DisputeDetailPage() {
   if (!id) return null;
 
   const { data, refetch } = threadQuery;
+  const messagingOpen = data
+    ? isDisputeMessagingOpen(data.dispute.status)
+    : false;
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-8">
@@ -124,6 +151,17 @@ export default function DisputeDetailPage() {
                 />
               </div>
             ) : null}
+
+            <div className="mt-6">
+              <DisputeResolutionPanel
+                disputeId={data.dispute.id}
+                status={data.dispute.status}
+                category={data.dispute.category}
+                priority={data.dispute.priority}
+                resolutionSummary={data.dispute.resolutionSummary}
+                assigneeName={data.dispute.assigneeName}
+              />
+            </div>
           </>
         ) : threadQuery.isPending ? (
           <PageLoading message="Loading thread…" centered={false} className="mt-4" />
@@ -141,9 +179,38 @@ export default function DisputeDetailPage() {
         ) : null}
       </div>
 
+      {data && data.events.length > 0 ? (
+        <section className="card overflow-hidden">
+          <header className="border-b border-[color:var(--border)] px-4 py-3 text-sm font-semibold">
+            Audit trail
+          </header>
+          <ul className="max-h-48 divide-y divide-[color:var(--border)] overflow-y-auto text-xs">
+            {data.events.map((ev) => (
+              <li key={ev.id} className="px-4 py-2.5">
+                <div className="font-semibold text-[color:var(--text)]">
+                  {formatEventTypeLabel(ev.eventType)}
+                  {ev.actorName ? (
+                    <span className="font-normal text-[color:var(--text-muted)]">
+                      {" "}
+                      · {ev.actorName}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="text-[color:var(--text-muted)]">
+                  {new Date(ev.createdAt).toLocaleString()}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       <section className="card flex flex-col overflow-hidden">
         <header className="border-b border-[color:var(--border)] px-4 py-3 text-sm font-semibold">
-          Conversation <span className="font-normal text-[color:var(--text-muted)]">(auto-refresh)</span>
+          Conversation{" "}
+          <span className="font-normal text-[color:var(--text-muted)]">
+            (auto-refresh)
+          </span>
         </header>
         <div className="max-h-[480px] min-h-[200px] space-y-3 overflow-y-auto px-4 py-4">
           {(data?.messages ?? []).length === 0 ? (
@@ -160,7 +227,7 @@ export default function DisputeDetailPage() {
               >
                 <div className="flex flex-wrap items-center justify-between gap-1 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
                   <span>{m.authorName ?? "Someone"}</span>
-                  <span>{new Date(m.createdAt).toLocaleTimeString()}</span>
+                  <span>{new Date(m.createdAt).toLocaleString()}</span>
                 </div>
                 <p className="mt-2 whitespace-pre-wrap text-[color:var(--text)]">
                   {m.body}
@@ -173,19 +240,25 @@ export default function DisputeDetailPage() {
           className="flex flex-col gap-2 border-t border-[color:var(--border)] p-4"
           onSubmit={(e) => {
             e.preventDefault();
-            if (!body.trim()) return;
+            if (!body.trim() || !messagingOpen) return;
             sendMessage.mutate();
           }}
         >
           <label className="block text-xs font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
             Reply
           </label>
+          {!messagingOpen && data ? (
+            <p className="text-xs text-[color:var(--text-muted)]">
+              Replies are closed for this case. Ask a coordinator to reopen if
+              you need to add information.
+            </p>
+          ) : null}
           <textarea
             className="input min-h-[80px]"
             placeholder="Reach your PM / logistics coordinator / super admin here…"
             value={body}
             onChange={(e) => setBody(e.target.value)}
-            disabled={sendMessage.isPending || !data}
+            disabled={sendMessage.isPending || !data || !messagingOpen}
           />
           {sendMessage.error ? (
             <p className="text-xs text-[color:var(--danger)]">
@@ -194,7 +267,9 @@ export default function DisputeDetailPage() {
           ) : null}
           <button
             type="submit"
-            disabled={sendMessage.isPending || !data || !body.trim()}
+            disabled={
+              sendMessage.isPending || !data || !body.trim() || !messagingOpen
+            }
             className="btn btn-primary self-end"
           >
             {sendMessage.isPending ? "Sending…" : "Send"}
