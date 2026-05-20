@@ -161,8 +161,8 @@ async function scanDeepLinkInner(
         return (
           <OutcomeShell
             status="blocked"
-            title="No delivery order yet"
-            body={`This warehouse sticker (SKU ${gate.productId}) is verified, but your PM has not created a delivery order for "${gate.projectName}" yet. Ask them to create one, then scan the same sticker again on site.`}
+            title="Nothing left to verify"
+            body={`SKU ${gate.productId} on "${gate.projectName}" is already verified on site, or this item is not on the project inventory. Open your delivery order from the dashboard if you need to review progress.`}
             hideNavigation={hideNavigation}
           />
         );

@@ -1,7 +1,8 @@
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { orderItems, orders, projects } from "@/db/schema";
 import type { ProjectApprovalStatus } from "@/db/schema";
+import { ensureDeliveryOrderForProject } from "@/lib/ensure-delivery-order";
 import { normalizeScanBarcode } from "@/lib/scan-deep-link";
 import { projectReadyForOnSiteVerification } from "@/lib/project-live";
 
@@ -74,7 +75,7 @@ export async function findDeliveryLineForSku(
       and(
         eq(orders.projectId, projectId),
         eq(orders.isLogisticsGate, false),
-        eq(orders.status, "active"),
+        inArray(orders.status, ["active", "anomaly"]),
         sql`lower(${orderItems.productId}) = lower(${sku})`,
         isNull(orderItems.scannedAt),
       ),
@@ -107,14 +108,20 @@ export async function resolveOnSiteScanTarget(
   if (
     projectReadyForOnSiteVerification(gateHit.projectApprovalStatus)
   ) {
-    const deliveryLine = await findDeliveryLineForSku(
+    let deliveryLine = await findDeliveryLineForSku(
       gateHit.projectId,
       gateHit.productId,
     );
+    if (!deliveryLine) {
+      await ensureDeliveryOrderForProject(gateHit.projectId);
+      deliveryLine = await findDeliveryLineForSku(
+        gateHit.projectId,
+        gateHit.productId,
+      );
+    }
     if (deliveryLine) {
       return { ...deliveryLine, matchedViaGateSticker: true };
     }
-    // Active projects must fulfill delivery lines — never return the gate row.
     return null;
   }
 

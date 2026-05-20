@@ -51,11 +51,18 @@ export async function GET() {
             .where(isNull(projects.archivedAt))
         : [{ awaitingReview: 0 as number, approvedLive: 0 as number }];
 
-    const recent = await db.query.orders.findMany({
+    const recentRows = await db.query.orders.findMany({
       with: { items: true, project: true },
       orderBy: [desc(orders.createdAt)],
-      limit: 5,
+      limit: 12,
     });
+
+    const recent =
+      auth.actor.role === "logistics"
+        ? recentRows.slice(0, 5)
+        : recentRows
+            .filter((o) => !o.isLogisticsGate)
+            .slice(0, 5);
 
     return NextResponse.json({
       orders: orderCounts,
@@ -69,7 +76,7 @@ export async function GET() {
               approvedLive: logisticsProjectCounts.approvedLive,
             }
           : undefined,
-      recent: recent.map((o) => ({
+      recent: recent.map((o: (typeof recentRows)[number]) => ({
         id: o.id,
         projectId: o.projectId,
         projectName: o.project?.name ?? "Unknown project",
