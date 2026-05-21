@@ -1,0 +1,7 @@
+[build]
+  command = "npm run build"
+
+# Google Maps browser keys are public by design (referrer-restricted in GCP).
+# NEXT_PUBLIC_* is inlined into client bundles; omit from Netlify secrets scan.
+[build.environment]
+  SECRETS_SCAN_OMIT_KEYS = "NEXT_PUBLIC_GOOGLE_MAPS_API_KEY"
