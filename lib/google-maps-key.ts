@@ -1,13 +1,24 @@
-/** Server-side Google Maps / Places API key. */
-export function googleMapsApiKey(): string | undefined {
-  return process.env.GOOGLE_MAPS_API_KEY?.trim() || undefined;
+function readKey(...names: string[]): string | undefined {
+  for (const name of names) {
+    const value = process.env[name]?.trim();
+    if (value) return value;
+  }
+  return undefined;
 }
 
-/** Browser key — set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY or mirror GOOGLE_MAPS_API_KEY in next.config. */
+/** Server-side Google Maps / Places / Geocoding API key. */
+export function googleMapsApiKey(): string | undefined {
+  return readKey("GOOGLE_MAPS_API_KEY", "NEXT_PUBLIC_GOOGLE_MAPS_API_KEY");
+}
+
+/**
+ * Browser key — must be present at **build time** (inlined into client JS).
+ * Set `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`, or `GOOGLE_MAPS_API_KEY` (mirrored
+ * via `next.config.ts` `env`).
+ */
 export function googleMapsPublicApiKey(): string | undefined {
-  return (
-    process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ||
-    process.env.GOOGLE_MAPS_API_KEY?.trim() ||
-    undefined
+  return readKey(
+    "NEXT_PUBLIC_GOOGLE_MAPS_API_KEY",
+    "GOOGLE_MAPS_API_KEY",
   );
 }

@@ -27,10 +27,44 @@ export function AddressPicker({
   required,
   disabled,
 }: Props) {
-  const apiKey = googleMapsPublicApiKey();
+  const [apiKey, setApiKey] = useState<string | undefined>(() =>
+    googleMapsPublicApiKey(),
+  );
+  const [keyLoading, setKeyLoading] = useState(
+    () => !googleMapsPublicApiKey(),
+  );
+  const [keyMissing, setKeyMissing] = useState(false);
   const [query, setQuery] = useState(value?.siteAddress ?? "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (apiKey) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/maps/config");
+        const json = (await res.json().catch(() => ({}))) as {
+          apiKey?: string;
+          error?: string;
+        };
+        if (cancelled) return;
+        if (res.ok && json.apiKey?.trim()) {
+          setApiKey(json.apiKey.trim());
+          setKeyMissing(false);
+        } else {
+          setKeyMissing(true);
+        }
+      } catch {
+        if (!cancelled) setKeyMissing(true);
+      } finally {
+        if (!cancelled) setKeyLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [apiKey]);
 
   useEffect(() => {
     if (value?.siteAddress) setQuery(value.siteAddress);
@@ -120,12 +154,21 @@ export function AddressPicker({
     );
   }
 
-  if (!apiKey) {
+  if (keyLoading) {
+    return (
+      <div className="rounded-lg border border-[color:var(--border)] bg-[color:var(--surface-muted)] px-3 py-2 text-sm text-[color:var(--text-muted)]">
+        Loading address search…
+      </div>
+    );
+  }
+
+  if (!apiKey || keyMissing) {
     return (
       <div className="rounded-lg border border-[color:var(--danger)] bg-red-50 px-3 py-2 text-sm text-[color:var(--danger)] dark:bg-red-950/30">
         Google Maps API key is not configured. Set{" "}
-        <code className="text-xs">GOOGLE_MAPS_API_KEY</code> (and enable Places
-        + Geocoding APIs) in <code className="text-xs">.env.local</code>.
+        <code className="text-xs">GOOGLE_MAPS_API_KEY</code> in Netlify
+        environment variables (or in <code className="text-xs">.env.local</code>{" "}
+        locally), enable Places + Geocoding in Google Cloud, then redeploy.
       </div>
     );
   }
