@@ -25,6 +25,7 @@ import {
   type DisputeTransition,
 } from "@/lib/dispute-resolution";
 import { useAuthedUser } from "@/components/session-context";
+import { downloadDisputeExport } from "@/lib/download-dispute-export";
 
 export interface DisputeResolutionPanelProps {
   disputeId: string;
@@ -50,6 +51,7 @@ export function DisputeResolutionPanel({
   );
   const [showResolveForm, setShowResolveForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState<"pdf" | "docx" | null>(null);
 
   const patchMut = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
@@ -86,6 +88,18 @@ export function DisputeResolutionPanel({
       return;
     }
     patchMut.mutate({ transition: "resolve", resolutionSummary: s });
+  }
+
+  async function runExport(format: "pdf" | "docx") {
+    setExporting(format);
+    setError(null);
+    try {
+      await downloadDisputeExport(disputeId, format);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setExporting(null);
+    }
   }
 
   return (
@@ -144,20 +158,22 @@ export function DisputeResolutionPanel({
       )}
 
       <div className="flex flex-wrap gap-2">
-        <a
+        <button
+          type="button"
           className="btn btn-ghost btn-sm"
-          href={`/api/disputes/${disputeId}/export?format=pdf`}
-          download
+          disabled={exporting !== null}
+          onClick={() => void runExport("pdf")}
         >
-          Export PDF
-        </a>
-        <a
+          {exporting === "pdf" ? "Exporting PDF…" : "Export PDF"}
+        </button>
+        <button
+          type="button"
           className="btn btn-ghost btn-sm"
-          href={`/api/disputes/${disputeId}/export?format=docx`}
-          download
+          disabled={exporting !== null}
+          onClick={() => void runExport("docx")}
         >
-          Export Word
-        </a>
+          {exporting === "docx" ? "Exporting Word…" : "Export Word"}
+        </button>
       </div>
 
       {manager && transitions.length > 0 ? (

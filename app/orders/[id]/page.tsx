@@ -14,10 +14,11 @@ import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthedUser } from '@/components/session-context';
 import { PackingLabelPrintSheet } from '@/components/packing-label';
-import { QrCode } from '@/components/qr-code';
+import { PackingLabelPreview } from '@/components/packing-label-preview';
+import { PrintPackingLabelsButton } from '@/components/print-packing-labels-button';
+import { mapOrderItemsToPackingLabels } from '@/lib/packing-label-items';
+import { canPrintPackingLabels } from '@/lib/packing-label-access';
 import { PACKING_LABEL } from '@/lib/packing-label-spec';
-import { printPackingLabels } from '@/lib/print-packing-labels';
-import { buildScanUrl } from '@/lib/scan-url';
 import { StatusPill } from '@/components/status-pill';
 import { ScanInput } from '@/components/scan-input';
 import { PageLoading } from '@/components/page-loading';
@@ -93,26 +94,6 @@ function orderHasPendingScansForPoll(data: DetailResponse | undefined) {
 function fmt(ts: string | Date | null | undefined) {
   if (!ts) return '—';
   return new Date(ts).toLocaleString();
-}
-
-/**
- * Convenience binding for the React tree: resolves `NEXT_PUBLIC_APP_URL`
- * and `window.location.origin` at call-time and delegates to the pure
- * `buildScanUrl` in `@/lib/scan-url` (covered by unit tests).
- *
- * `scanToken` (if supplied) is appended as `?st=<token>` so the URL is
- * self-authorising — the installer's phone scanner opens it directly,
- * no login wall, no tap-to-paste.
- */
-function resolveScanUrl(barcode: string, scanToken?: string) {
-  return buildScanUrl(barcode, {
-    envOrigin: process.env.NEXT_PUBLIC_APP_URL,
-    windowOrigin:
-      typeof window !== 'undefined' && window.location
-        ? window.location.origin
-        : null,
-    scanToken,
-  });
 }
 
 export default function OrderDetailPage({
@@ -238,15 +219,11 @@ export default function OrderDetailPage({
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          {user.role === 'pm' && data.items.length > 0 && (
-            <button
+          {canPrintPackingLabels(user.role) && data.items.length > 0 && (
+            <PrintPackingLabelsButton
               className="btn btn-ghost"
-              onClick={() => printPackingLabels()}
               data-tour="pm-print"
-              title={PACKING_LABEL.printHint}
-            >
-              Print labels (1.5×1 in)
-            </button>
+            />
           )}
           {canEdit && (
             <button
@@ -312,12 +289,7 @@ export default function OrderDetailPage({
       )}
       </div>
       <PackingLabelPrintSheet
-        items={data.items.map((it) => ({
-          barcode: it.barcode,
-          productId: it.productId,
-          productName: productByKey.get(it.productId)?.name ?? null,
-          printedScanToken: it.printedScanToken,
-        }))}
+        items={mapOrderItemsToPackingLabels(data.items, productByKey)}
       />
     </>
   );
@@ -407,7 +379,7 @@ function PmView({
     {
       selector: "[data-tour='pm-print']",
       title: 'Print packing labels',
-      body: `Print ${PACKING_LABEL.widthIn}×${PACKING_LABEL.heightIn} in stickers for your ${PACKING_LABEL.printerModel}. QR left, SKU + name on the right — one label per item.`,
+      body: `Print ${PACKING_LABEL.widthIn}×${PACKING_LABEL.heightIn} in stickers for your ${PACKING_LABEL.printerModel}. Large QR with SKU + name below — one label per item.`,
     },
   ];
 
@@ -1252,55 +1224,6 @@ function ItemsGrid({
   );
 }
 
-/**
- * Scan art for a single order item: QR only. A linear barcode encoding the
- * full URL was too wide for the card grid; the bare code is still shown in
- * monospace under the card for typing / USB scanners.
- */
-function ItemScanArt({
-  barcode,
-  scanToken,
-}: {
-  barcode: string;
-  scanToken?: string;
-}) {
-  const url = resolveScanUrl(barcode, scanToken);
-  // Show the URL host as a small "tap-to-open" affordance so installers
-  // can sanity-check that the QR resolves to the right server.
-  let host = '';
-  try {
-    host = new URL(url).host;
-  } catch {
-    host = '';
-  }
-
-  return (
-    <div className="flex flex-col items-stretch gap-2 rounded-lg bg-white p-3">
-      <div className="flex flex-col items-center gap-1.5">
-        <a
-          href={url}
-          className="rounded-md ring-1 ring-[color:var(--border)] transition hover:ring-[color:var(--primary)]"
-          title="Tap on a phone to open the order. PMs: print this and stick it on the item."
-        >
-          <QrCode value={url} size={168} />
-        </a>
-        <div className="text-center">
-          <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[color:var(--primary)]">
-            Scan with phone camera
-          </div>
-          <div className="text-[10px] text-[color:var(--text-muted)]">
-            Opens automatically — no typing
-          </div>
-          {host && (
-            <div className="mt-0.5 break-all font-mono text-[9px] text-[color:var(--text-muted)]">
-              {host}/s/{barcode}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function ItemCard({
   item,
@@ -1365,7 +1288,16 @@ function ItemCard({
         </div>
       </div>
 
-      <ItemScanArt barcode={item.barcode} scanToken={item.printedScanToken} />
+      <PackingLabelPreview
+        item={{
+          barcode: item.barcode,
+          productId: item.productId,
+          productName: product?.name ?? null,
+          printedScanToken: item.printedScanToken,
+        }}
+        zoom={2}
+        className="mx-auto"
+      />
 
       <div className="flex items-center justify-between text-[11px] text-[color:var(--text-muted)]">
         <span className="font-mono">{item.barcode}</span>

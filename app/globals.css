@@ -362,11 +362,16 @@ body {
   }
 
   html.packing-label-print .packing-label {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
     box-sizing: border-box !important;
     width: 1.5in !important;
     height: 1in !important;
-    padding: 0.02in 0.03in !important;
+    padding: 0.015in 0.02in 0.01in !important;
     margin: 0 !important;
+    gap: 0.008in !important;
     overflow: hidden !important;
     page-break-after: always !important;
     break-after: page !important;
@@ -377,6 +382,37 @@ body {
     print-color-adjust: exact;
     outline: none !important;
     box-shadow: none !important;
+  }
+
+  html.packing-label-print .packing-label__qr {
+    display: flex !important;
+    flex: 1 1 auto !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 100% !important;
+    min-height: 0 !important;
+  }
+
+  html.packing-label-print .packing-label__qr-canvas {
+    width: 0.78in !important;
+    height: 0.78in !important;
+    max-width: 100% !important;
+    max-height: 0.78in !important;
+  }
+
+  html.packing-label-print .packing-label__caption {
+    display: flex !important;
+    flex: 0 0 auto !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    width: 100% !important;
+    text-align: center !important;
+    gap: 0.004in !important;
+  }
+
+  html.packing-label-print .packing-label__sku,
+  html.packing-label-print .packing-label__name {
+    display: block !important;
   }
 
   html.packing-label-print .packing-label:last-child {

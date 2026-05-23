@@ -15,15 +15,19 @@ import {
 import { buildScanUrl } from '@/lib/scan-url';
 import { normalizeScanBarcode } from '@/lib/scan-deep-link';
 import { PackingLabelPrintSheet } from '@/components/packing-label';
-import { QrCode } from '@/components/qr-code';
-import { PACKING_LABEL } from '@/lib/packing-label-spec';
-import { printPackingLabels } from '@/lib/print-packing-labels';
+import { PackingLabelPreview } from '@/components/packing-label-preview';
+import { PrintPackingLabelsButton } from '@/components/print-packing-labels-button';
+import { mapOrderItemsToPackingLabels } from '@/lib/packing-label-items';
+import { canPrintPackingLabels } from '@/lib/packing-label-access';
 import { ScanInput } from '@/components/scan-input';
 import { useAuthedUser } from '@/components/session-context';
 import { ResourceLoadError } from '@/components/resource-load-error';
 import { PageLoading } from '@/components/page-loading';
 
-type OrderItemOut = OrderItem & { printedScanToken?: string };
+type OrderItemOut = OrderItem & {
+  printedScanToken?: string;
+  productName?: string | null;
+};
 
 interface GatePayload {
   order: Order;
@@ -266,15 +270,8 @@ export default function ProjectLogisticsScanPage({
           </p>
         )}
         </div>
-        {hasLines ? (
-          <button
-            type="button"
-            className="btn btn-ghost shrink-0"
-            onClick={() => printPackingLabels()}
-            title={PACKING_LABEL.printHint}
-          >
-            Print labels (1.5×1 in)
-          </button>
+        {hasLines && user && canPrintPackingLabels(user.role) ? (
+          <PrintPackingLabelsButton className="btn btn-ghost shrink-0" />
         ) : null}
       </header>
 
@@ -347,7 +344,15 @@ export default function ProjectLogisticsScanPage({
                   className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-start"
                 >
                   <div className="no-print shrink-0">
-                    <QrCode value={url} />
+                    <PackingLabelPreview
+                      item={{
+                        barcode: it.barcode,
+                        productId: it.productId,
+                        productName: it.productName,
+                        printedScanToken: it.printedScanToken,
+                      }}
+                      zoom={2}
+                    />
                   </div>
                   <div className="min-w-0 flex-1 space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
@@ -429,11 +434,7 @@ export default function ProjectLogisticsScanPage({
       </section>
       </div>
       <PackingLabelPrintSheet
-        items={data.items.map((it) => ({
-          barcode: it.barcode,
-          productId: it.productId,
-          printedScanToken: it.printedScanToken,
-        }))}
+        items={mapOrderItemsToPackingLabels(data.items)}
       />
     </>
   );

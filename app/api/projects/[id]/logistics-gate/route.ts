@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { orderItems, orders, projects } from "@/db/schema";
+import { orderItems, orders, products, projects } from "@/db/schema";
 import { requireUserAny } from "@/lib/auth-guard";
 import { handleError, jsonError } from "@/lib/api";
 import { ensureLogisticsGateOrder } from "@/lib/logistics-gate-order";
@@ -13,6 +13,7 @@ import { computeLogisticsProgress } from "@/lib/scan";
 
 type OrderItemOut = (typeof orderItems.$inferSelect) & {
   printedScanToken?: string;
+  productName?: string | null;
 };
 
 /**
@@ -52,9 +53,15 @@ export async function GET(
       orderBy: [asc(orderItems.createdAt)],
     });
 
+    const catalog = await db.query.products.findMany({
+      where: eq(products.projectId, projectId),
+    });
+    const productNameBySku = new Map(catalog.map((p) => [p.sku, p.name]));
+
     const ttl = printedScanTokenTtlMs();
     const itemsOut: OrderItemOut[] = items.map((item) => ({
       ...item,
+      productName: productNameBySku.get(item.productId) ?? null,
       printedScanToken: signPrintedScanToken(item.barcode, ttl),
     }));
 

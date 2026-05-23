@@ -5,8 +5,11 @@ import { loadDisputeBundle } from "@/lib/dispute-bundle";
 import {
   buildDisputeDocx,
   buildDisputePdf,
-  disputeExportFilename,
 } from "@/lib/dispute-export";
+import { disputeExportFilename } from "@/lib/dispute-export-filename";
+
+/** pdfkit requires Node.js file access for built-in fonts. */
+export const runtime = "nodejs";
 
 /**
  * GET /api/disputes/[id]/export?format=pdf|docx
