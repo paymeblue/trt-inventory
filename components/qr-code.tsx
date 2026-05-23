@@ -7,6 +7,7 @@ interface QrCodeProps {
   /** Full value to encode (typically an https URL). */
   value: string;
   size?: number;
+  margin?: number;
   className?: string;
 }
 
@@ -17,20 +18,20 @@ interface QrCodeProps {
  * either a phone camera (QR → URL → auto-complete scan) or a handheld
  * USB scanner (CODE128 → types bare barcode into the manual input) works.
  */
-export function QrCode({ value, size = 128, className }: QrCodeProps) {
+export function QrCode({ value, size = 128, margin = 1, className }: QrCodeProps) {
   const ref = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
     if (!ref.current) return;
     QRCode.toCanvas(ref.current, value, {
       width: size,
-      margin: 1,
+      margin,
       errorCorrectionLevel: "M",
       color: { dark: "#000000", light: "#ffffff" },
     }).catch((err) => {
       console.error("Failed to render QR code", err);
     });
-  }, [value, size]);
+  }, [value, size, margin]);
 
   return (
     <canvas

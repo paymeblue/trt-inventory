@@ -218,10 +218,94 @@ body {
   z-index: 60;
 }
 
-/* Print styles: always force a light palette so printed barcodes/QRs
- * stay high-contrast regardless of the user's chosen theme. */
+/* Xprinter XP-365B — 1.5in × 1in (38 × 25 mm) packing sticker layout */
+.packing-label {
+  box-sizing: border-box;
+  width: 1.5in;
+  height: 1in;
+  padding: 0.015in 0.02in 0.01in;
+  margin: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.008in;
+  background: #fff;
+  color: #000;
+}
+
+.packing-label__qr {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 0;
+  line-height: 0;
+}
+
+.packing-label__qr-canvas {
+  width: 0.78in !important;
+  height: 0.78in !important;
+  max-width: 100%;
+  max-height: 0.78in;
+  image-rendering: pixelated;
+}
+
+.packing-label__caption {
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.004in;
+  text-align: center;
+}
+
+.packing-label__sku {
+  font: 700 4pt/1.05 ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: 0.01em;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.packing-label__name {
+  font: 3.5pt/1.1 ui-sans-serif, system-ui, sans-serif;
+  max-width: 100%;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+}
+
+/* Dev preview — true size + optional zoom (/dev/packing-labels) */
+.packing-label-preview-stage .packing-label {
+  outline: 1px dashed #888;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 12%);
+}
+
+.packing-label-preview-stage--zoom-2 {
+  zoom: 2;
+}
+
+.packing-label-preview-stage--zoom-3 {
+  zoom: 3;
+}
+
+/* Screen: hide the print-only label stack on order pages */
+.packing-label-print-root {
+  display: none;
+}
+
+/* Print styles: force light palette + XP-365B label pages */
 @media print {
-  :root, [data-theme="dark"] {
+  :root,
+  [data-theme="dark"] {
     --background: #ffffff;
     --surface: #ffffff;
     --surface-muted: #f4f4f4;
@@ -229,7 +313,85 @@ body {
     --text: #000000;
     --text-muted: #444444;
   }
-  .no-print { display: none !important; }
-  .card { box-shadow: none !important; border-color: #ccc !important; }
-  body { background: #fff !important; color: #000 !important; }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .card {
+    box-shadow: none !important;
+    border-color: #ccc !important;
+  }
+
+  /*
+   * Label page size (1.5 × 1 in). Chrome may still default to Letter until
+   * you pick a custom 38×25 mm paper size in the print dialog / XP-365B driver.
+   */
+  @page {
+    size: 1.5in 1in;
+    margin: 0;
+  }
+
+  /*
+   * Packing-label print mode (see lib/print-packing-labels.ts):
+   * Print root is portaled to document.body so hiding app-shell siblings does
+   * not suppress the label stack (display:none on ancestors blocks descendants).
+   */
+  html.packing-label-print,
+  html.packing-label-print body {
+    width: 1.5in !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+    color: #000 !important;
+    overflow: visible !important;
+  }
+
+  html.packing-label-print body > *:not(.packing-label-print-root) {
+    display: none !important;
+  }
+
+  html.packing-label-print .packing-label-print-root {
+    display: block !important;
+    position: static !important;
+    width: 1.5in !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  html.packing-label-print .packing-label {
+    box-sizing: border-box !important;
+    width: 1.5in !important;
+    height: 1in !important;
+    padding: 0.02in 0.03in !important;
+    margin: 0 !important;
+    overflow: hidden !important;
+    page-break-after: always !important;
+    break-after: page !important;
+    page-break-inside: avoid !important;
+    background: #fff !important;
+    color: #000 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    outline: none !important;
+    box-shadow: none !important;
+  }
+
+  html.packing-label-print .packing-label:last-child {
+    page-break-after: auto !important;
+    break-after: auto !important;
+  }
+
+  /* Non-label prints (rare) — keep previous behaviour */
+  body {
+    background: #fff !important;
+    color: #000 !important;
+    margin: 0 !important;
+  }
+
+  .packing-label-print-root {
+    display: block !important;
+  }
 }

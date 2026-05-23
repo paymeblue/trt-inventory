@@ -14,7 +14,10 @@ import {
 } from '@/lib/query-keys';
 import { buildScanUrl } from '@/lib/scan-url';
 import { normalizeScanBarcode } from '@/lib/scan-deep-link';
+import { PackingLabelPrintSheet } from '@/components/packing-label';
 import { QrCode } from '@/components/qr-code';
+import { PACKING_LABEL } from '@/lib/packing-label-spec';
+import { printPackingLabels } from '@/lib/print-packing-labels';
 import { ScanInput } from '@/components/scan-input';
 import { useAuthedUser } from '@/components/session-context';
 import { ResourceLoadError } from '@/components/resource-load-error';
@@ -230,8 +233,9 @@ export default function ProjectLogisticsScanPage({
   }
 
   return (
-    <div className="space-y-6">
-      <nav className="no-print text-xs text-[color:var(--text-muted)]">
+    <>
+      <div className="no-print space-y-6">
+      <nav className="text-xs text-[color:var(--text-muted)]">
         <Link href="/approvals/logistics" className="hover:underline">
           ← Logistics queue
         </Link>
@@ -241,7 +245,8 @@ export default function ProjectLogisticsScanPage({
         </Link>
       </nav>
 
-      <header>
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
         <h1 className="text-2xl font-semibold">
           Warehouse scan — {data.project.name}
         </h1>
@@ -260,6 +265,17 @@ export default function ProjectLogisticsScanPage({
             packing sticker (TRT-…) in the list below.
           </p>
         )}
+        </div>
+        {hasLines ? (
+          <button
+            type="button"
+            className="btn btn-ghost shrink-0"
+            onClick={() => printPackingLabels()}
+            title={PACKING_LABEL.printHint}
+          >
+            Print labels (1.5×1 in)
+          </button>
+        ) : null}
       </header>
 
       <section className="card p-5">
@@ -411,6 +427,14 @@ export default function ProjectLogisticsScanPage({
           </p>
         )}
       </section>
-    </div>
+      </div>
+      <PackingLabelPrintSheet
+        items={data.items.map((it) => ({
+          barcode: it.barcode,
+          productId: it.productId,
+          printedScanToken: it.printedScanToken,
+        }))}
+      />
+    </>
   );
 }

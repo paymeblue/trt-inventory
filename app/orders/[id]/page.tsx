@@ -13,7 +13,10 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthedUser } from '@/components/session-context';
+import { PackingLabelPrintSheet } from '@/components/packing-label';
 import { QrCode } from '@/components/qr-code';
+import { PACKING_LABEL } from '@/lib/packing-label-spec';
+import { printPackingLabels } from '@/lib/print-packing-labels';
 import { buildScanUrl } from '@/lib/scan-url';
 import { StatusPill } from '@/components/status-pill';
 import { ScanInput } from '@/components/scan-input';
@@ -200,8 +203,9 @@ export default function OrderDetailPage({
   for (const p of projectItems) productByKey.set(p.sku, p);
 
   return (
-    <div className="space-y-6">
-      <nav className="no-print text-xs text-[color:var(--text-muted)]">
+    <>
+      <div className="no-print space-y-6">
+      <nav className="text-xs text-[color:var(--text-muted)]">
         <Link href="/orders" className="hover:underline">
           ← Back to orders
         </Link>
@@ -233,14 +237,15 @@ export default function OrderDetailPage({
             )}
           </div>
         </div>
-        <div className="no-print flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2">
           {user.role === 'pm' && data.items.length > 0 && (
             <button
               className="btn btn-ghost"
-              onClick={() => window.print()}
+              onClick={() => printPackingLabels()}
               data-tour="pm-print"
+              title={PACKING_LABEL.printHint}
             >
-              Print barcodes
+              Print labels (1.5×1 in)
             </button>
           )}
           {canEdit && (
@@ -305,7 +310,16 @@ export default function OrderDetailPage({
       ) : (
         <ReadOnlyItems items={data.items} productByKey={productByKey} />
       )}
-    </div>
+      </div>
+      <PackingLabelPrintSheet
+        items={data.items.map((it) => ({
+          barcode: it.barcode,
+          productId: it.productId,
+          productName: productByKey.get(it.productId)?.name ?? null,
+          printedScanToken: it.printedScanToken,
+        }))}
+      />
+    </>
   );
 }
 
@@ -392,8 +406,8 @@ function PmView({
     },
     {
       selector: "[data-tour='pm-print']",
-      title: 'Print them all at once',
-      body: 'Hit Print barcodes to generate a clean, printer-friendly sheet for every item.',
+      title: 'Print packing labels',
+      body: `Print ${PACKING_LABEL.widthIn}×${PACKING_LABEL.heightIn} in stickers for your ${PACKING_LABEL.printerModel}. QR left, SKU + name on the right — one label per item.`,
     },
   ];
 
