@@ -18,6 +18,7 @@ async function handlePost(
   ctx?: { params: Promise<{ id: string }> },
 ) {
   if (!ctx) return jsonError(500, "Missing route context");
+  // Warehouse verification is a logistics duty; super-admin can override.
   const auth = await requireUserAny(["logistics", "super_admin"]);
   if ("error" in auth) return auth.error;
 

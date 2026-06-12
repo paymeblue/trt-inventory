@@ -105,8 +105,8 @@ function ProjectApprovalBanners({
       body: "Installers cannot see this project until a super-admin approves it and logistics activates it.",
     },
     pending_logistics: {
-      title: "Waiting for logistics",
-      body: "Super-admin approved this project. Logistics must confirm stock and activate it before installers can use it.",
+      title: "Approved — print the barcodes",
+      body: "Super-admin approved this project. Print the packing barcodes, paste one on each physical box, and hand the boxes to logistics. Logistics must scan every sticker before approving the project for orders.",
     },
     rejected_super_admin: {
       title: "Rejected by super-admin",
@@ -134,6 +134,15 @@ function ProjectApprovalBanners({
           {m.title}
         </div>
         <p className="mt-1 text-xs text-[color:var(--text)]">{m.body}</p>
+        {(viewerRole === "pm" || viewerRole === "super_admin") &&
+          project.approvalStatus === "pending_logistics" && (
+            <Link
+              href={`/projects/${project.id}/print-barcodes`}
+              className="btn btn-primary mt-3 inline-flex"
+            >
+              Print barcodes
+            </Link>
+          )}
         {viewerRole === "logistics" &&
           project.approvalStatus === "pending_logistics" &&
           project.projectBarcode && (

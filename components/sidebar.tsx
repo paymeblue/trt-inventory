@@ -7,6 +7,7 @@ import {
   ClipboardDocumentListIcon,
   FolderIcon,
   LightBulbIcon,
+  PrinterIcon,
   PlusCircleIcon,
   QrCodeIcon,
   ScaleIcon,
@@ -123,14 +124,21 @@ export function Sidebar() {
       fetchJson<{
         superAdminProjects: number;
         logisticsProjects: number;
+        pmPrintQueue?: number;
         superAdminDisputes?: number;
       }>("/api/approvals/queue-counts"),
     enabled:
-      !!user && (user.role === "super_admin" || user.role === "logistics"),
+      !!user &&
+      (user.role === "super_admin" ||
+        user.role === "logistics" ||
+        user.role === "pm"),
     staleTime: 0,
     /** Fallback poll when another tab or role changes queues; mutations invalidate immediately. */
     refetchInterval: 20_000,
   });
+
+  const pmPrintCount =
+    user?.role === "pm" ? (qc?.pmPrintQueue ?? 0) : 0;
 
   if (!user) return null;
 
@@ -151,6 +159,7 @@ export function Sidebar() {
         aria-label="Main navigation"
       >
         {nav.map((item) => {
+
           const active =
             item.href === "/"
               ? pathname === "/"
@@ -197,6 +206,22 @@ export function Sidebar() {
             </Link>
           );
         })}
+        {user.role === "pm" && pmPrintCount > 0 && (
+          <Link
+            href="/projects"
+            className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+              pathname === "/projects"
+                ? "bg-[color:var(--primary)] text-[color:var(--primary-foreground)]"
+                : "text-[color:var(--text)] hover:bg-[color:var(--surface-muted)]"
+            }`}
+          >
+            <PrinterIcon className="h-5 w-5 shrink-0" aria-hidden />
+            <span className="min-w-0 flex-1 truncate">Print barcodes</span>
+            <span className="shrink-0 rounded-full bg-amber-500 px-2 py-0.5 text-[10px] font-bold leading-none text-white">
+              {pmPrintCount > 99 ? "99+" : pmPrintCount}
+            </span>
+          </Link>
+        )}
       </nav>
 
       <div className="shrink-0 space-y-3 border-t border-[color:var(--border)] bg-[color:var(--surface)] px-3 pb-4 pt-3">

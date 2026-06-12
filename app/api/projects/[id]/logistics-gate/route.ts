@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { orderItems, orders, products, projects } from "@/db/schema";
+import { orderItems, products, projects } from "@/db/schema";
 import { requireUserAny } from "@/lib/auth-guard";
 import { handleError, jsonError } from "@/lib/api";
 import { ensureLogisticsGateOrder } from "@/lib/logistics-gate-order";
@@ -24,7 +24,7 @@ export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireUserAny(["logistics", "super_admin"]);
+  const auth = await requireUserAny(["pm", "logistics", "super_admin"]);
   if ("error" in auth) return auth.error;
   try {
     const { id: projectId } = await params;
@@ -58,11 +58,17 @@ export async function GET(
     });
     const productNameBySku = new Map(catalog.map((p) => [p.sku, p.name]));
 
+    // Sticker tokens power the printable QR labels — only the PM and
+    // super-admin handle stickers, logistics just scans physical boxes.
+    const includeStickerTokens =
+      auth.actor.role === "pm" || auth.actor.role === "super_admin";
     const ttl = printedScanTokenTtlMs();
     const itemsOut: OrderItemOut[] = items.map((item) => ({
       ...item,
       productName: productNameBySku.get(item.productId) ?? null,
-      printedScanToken: signPrintedScanToken(item.barcode, ttl),
+      ...(includeStickerTokens
+        ? { printedScanToken: signPrintedScanToken(item.barcode, ttl) }
+        : {}),
     }));
 
     return NextResponse.json({

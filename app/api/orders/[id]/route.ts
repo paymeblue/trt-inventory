@@ -57,10 +57,16 @@ export async function GET(
     }
     // self-authorising. Bound to one barcode each — a leaked sticker
     // can only acknowledge that one item, never log in or scan others.
+    // Tokens render the printable sticker QRs, which only the PM and
+    // super-admin handle.
+    const includeStickerTokens =
+      auth.actor.role === "pm" || auth.actor.role === "super_admin";
     const ttl = printedScanTokenTtlMs();
     const itemsOut = items.map((item) => ({
       ...item,
-      printedScanToken: signPrintedScanToken(item.barcode, ttl),
+      ...(includeStickerTokens
+        ? { printedScanToken: signPrintedScanToken(item.barcode, ttl) }
+        : {}),
     }));
 
     return NextResponse.json({

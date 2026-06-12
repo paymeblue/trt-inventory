@@ -8,7 +8,6 @@ import { generateBarcode } from "@/lib/barcode";
 import { handleError, jsonError } from "@/lib/api";
 import { applyPendingCategoryAdds } from "@/lib/apply-pending-category-adds";
 import { applyPendingItemChanges } from "@/lib/apply-pending-item-changes";
-import { ensureDeliveryOrder } from "@/lib/ensure-delivery-order";
 import { ensureLogisticsGateOrder } from "@/lib/logistics-gate-order";
 import {
   METADATA_PENDING_LOGISTICS,
@@ -161,6 +160,8 @@ export async function POST(
     }
 
     if (body.action === "logistics_fulfill") {
+      // Logistics approves after warehouse verification; super-admin can
+      // always override.
       const auth = await requireUserAny(["logistics", "super_admin"]);
       if ("error" in auth) return auth.error;
       if (project.approvalStatus !== "pending_logistics") {
@@ -214,25 +215,17 @@ export async function POST(
         }
       }
 
-      const updated = await db.transaction(async (tx) => {
-        const [proj] = await tx
-          .update(projects)
-          .set({
-            approvalStatus: "active",
-            updatedAt: new Date(),
-          })
-          .where(eq(projects.id, id))
-          .returning();
-        if (!proj) {
-          throw new Error("Project disappeared during logistics activation");
-        }
-        await ensureDeliveryOrder(tx, {
-          projectId: id,
-          createdBy: auth.actor.name,
-          createdById: auth.actor.userId,
-        });
-        return proj;
-      });
+      const [updated] = await db
+        .update(projects)
+        .set({
+          approvalStatus: "active",
+          updatedAt: new Date(),
+        })
+        .where(eq(projects.id, id))
+        .returning();
+      if (!updated) {
+        return jsonError(500, "Project disappeared during logistics activation");
+      }
       return NextResponse.json({ project: updated });
     }
 

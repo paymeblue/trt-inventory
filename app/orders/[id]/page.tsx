@@ -288,9 +288,11 @@ export default function OrderDetailPage({
         <ReadOnlyItems items={data.items} productByKey={productByKey} />
       )}
       </div>
-      <PackingLabelPrintSheet
-        items={mapOrderItemsToPackingLabels(data.items, productByKey)}
-      />
+      {canPrintPackingLabels(user.role) && (
+        <PackingLabelPrintSheet
+          items={mapOrderItemsToPackingLabels(data.items, productByKey)}
+        />
+      )}
     </>
   );
 }
@@ -1240,6 +1242,7 @@ function ItemCard({
   isTourAnchor?: boolean;
   flashing?: 'success' | 'warn' | null;
 }) {
+  const user = useAuthedUser();
   const done = !!item.scannedAt;
   const cardRef = useRef<HTMLLIElement | null>(null);
 
@@ -1288,16 +1291,18 @@ function ItemCard({
         </div>
       </div>
 
-      <PackingLabelPreview
-        item={{
-          barcode: item.barcode,
-          productId: item.productId,
-          productName: product?.name ?? null,
-          printedScanToken: item.printedScanToken,
-        }}
-        zoom={2}
-        className="mx-auto"
-      />
+      {user && canPrintPackingLabels(user.role) && (
+        <PackingLabelPreview
+          item={{
+            barcode: item.barcode,
+            productId: item.productId,
+            productName: product?.name ?? null,
+            printedScanToken: item.printedScanToken,
+          }}
+          zoom={2}
+          className="mx-auto"
+        />
+      )}
 
       <div className="flex items-center justify-between text-[11px] text-[color:var(--text-muted)]">
         <span className="font-mono">{item.barcode}</span>

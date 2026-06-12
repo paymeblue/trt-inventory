@@ -12,17 +12,12 @@ import {
   invalidateWorkspaceProjects,
   queryKeys,
 } from '@/lib/query-keys';
-import { buildScanUrl } from '@/lib/scan-url';
 import { normalizeScanBarcode } from '@/lib/scan-deep-link';
-import { PackingLabelPrintSheet } from '@/components/packing-label';
-import { PackingLabelPreview } from '@/components/packing-label-preview';
-import { PrintPackingLabelsButton } from '@/components/print-packing-labels-button';
-import { mapOrderItemsToPackingLabels } from '@/lib/packing-label-items';
-import { canPrintPackingLabels } from '@/lib/packing-label-access';
 import { ScanInput } from '@/components/scan-input';
 import { useAuthedUser } from '@/components/session-context';
 import { ResourceLoadError } from '@/components/resource-load-error';
 import { PageLoading } from '@/components/page-loading';
+import { useToast } from '@/components/toast';
 
 type OrderItemOut = OrderItem & {
   printedScanToken?: string;
@@ -84,6 +79,7 @@ export default function ProjectLogisticsScanPage({
   const searchParams = useSearchParams();
   const qc = useQueryClient();
   const user = useAuthedUser();
+  const { showToast } = useToast();
   const [flash, setFlash] = useState<string | null>(null);
   const deepLinkScanDone = useRef(false);
 
@@ -139,6 +135,10 @@ export default function ProjectLogisticsScanPage({
       }),
     onSuccess: async () => {
       await invalidateAfterFulfill();
+      const projectName = gateQuery.data?.project.name ?? 'The project';
+      showToast(
+        `${projectName} approved — the PM can now create a delivery order. Receivers will see the project once an order exists.`,
+      );
       router.push('/approvals/logistics');
     },
   });
@@ -227,15 +227,6 @@ export default function ProjectLogisticsScanPage({
   const logisticsComplete =
     !hasLines || (data.progress.total > 0 && data.progress.remaining === 0);
 
-  function stickerUrl(barcode: string, token?: string) {
-    return buildScanUrl(barcode, {
-      envOrigin: process.env.NEXT_PUBLIC_APP_URL,
-      windowOrigin:
-        typeof window !== 'undefined' ? window.location.origin : null,
-      scanToken: token,
-    });
-  }
-
   return (
     <>
       <div className="no-print space-y-6">
@@ -270,9 +261,6 @@ export default function ProjectLogisticsScanPage({
           </p>
         )}
         </div>
-        {hasLines && user && canPrintPackingLabels(user.role) ? (
-          <PrintPackingLabelsButton className="btn btn-ghost shrink-0" />
-        ) : null}
       </header>
 
       <section className="card p-5">
@@ -329,11 +317,10 @@ export default function ProjectLogisticsScanPage({
       {hasLines && (
         <section className="card overflow-hidden">
           <header className="border-b border-[color:var(--border)] px-5 py-3 text-sm font-semibold">
-            Packing stickers (Would be removed after demo)
+            Boxes to verify
           </header>
           <ul className="divide-y divide-[color:var(--border)]">
             {data.items.map((it) => {
-              const url = stickerUrl(it.barcode, it.printedScanToken);
               const picked =
                 it.logisticsScannedAt !== null &&
                 it.logisticsScannedAt !== undefined;
@@ -341,58 +328,27 @@ export default function ProjectLogisticsScanPage({
               return (
                 <li
                   key={it.id}
-                  className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-start"
+                  className="flex items-center justify-between gap-3 px-5 py-3"
                 >
-                  <div className="no-print shrink-0">
-                    <PackingLabelPreview
-                      item={{
-                        barcode: it.barcode,
-                        productId: it.productId,
-                        productName: it.productName,
-                        printedScanToken: it.printedScanToken,
-                      }}
-                      zoom={2}
-                    />
-                  </div>
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-mono text-sm font-semibold">
-                        {it.productId}
-                      </span>
-                      {picked ? (
-                        <span className="pill pill-fulfilled text-[10px]">
-                          Warehouse scanned
-                        </span>
-                      ) : (
-                        <span className="pill pill-anomaly text-[10px]">
-                          Awaiting scan
-                        </span>
-                      )}
+                  <div className="min-w-0">
+                    <div className="font-mono text-sm font-semibold">
+                      {it.productId}
                     </div>
-                    <div className="truncate font-mono text-xs text-[color:var(--text-muted)]">
-                      {it.barcode}
-                    </div>
+                    {it.productName && (
+                      <div className="text-xs text-[color:var(--text-muted)]">
+                        {it.productName}
+                      </div>
+                    )}
                   </div>
-                  <div className="flex shrink-0 flex-col gap-2 self-start">
-                    {!picked ? (
-                      <button
-                        type="button"
-                        className="btn btn-primary btn-sm"
-                        disabled={scanMut.isPending}
-                        onClick={() => void onManualScan(it.barcode)}
-                      >
-                        Scan this box
-                      </button>
-                    ) : null}
-                    <Link
-                      className="btn btn-ghost btn-sm"
-                      href={url}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Open sticker URL
-                    </Link>
-                  </div>
+                  {picked ? (
+                    <span className="pill pill-fulfilled text-[10px]">
+                      Warehouse scanned
+                    </span>
+                  ) : (
+                    <span className="pill pill-anomaly text-[10px]">
+                      Awaiting scan
+                    </span>
+                  )}
                 </li>
               );
             })}
@@ -401,11 +357,13 @@ export default function ProjectLogisticsScanPage({
       )}
 
       <section className="card border-[color:var(--border)] p-5">
-        <h2 className="text-base font-semibold">Activate for receivers</h2>
+        <h2 className="text-base font-semibold">
+          Approve for PM to create order
+        </h2>
         <p className="mt-1 text-xs text-[color:var(--text-muted)]">
           {hasLines
-            ? 'Logistics only verifies packing in the warehouse. When every line is verified, activate the project so receivers can fulfill PM delivery orders on site.'
-            : 'Activate to release this empty project for receivers.'}
+            ? 'Logistics only verifies packing in the warehouse — fulfillment stays with the receiver on site. When every line is verified, approve the project so the PM can create a delivery order. Receivers only see the project after that order exists.'
+            : 'Approve to release this empty project so the PM can create an order.'}
         </p>
         <div className="mt-4 flex flex-wrap gap-3">
           <button
@@ -416,11 +374,11 @@ export default function ProjectLogisticsScanPage({
             }
             onClick={() => fulfillMut.mutate()}
           >
-            {fulfillMut.isPending ? 'Activating…' : 'Activate project'}
+            {fulfillMut.isPending ? 'Approving…' : 'Approve project'}
           </button>
           {!logisticsComplete && hasLines ? (
             <span className="self-center text-xs text-[color:var(--text-muted)]">
-              Finish every warehouse scan before activating.
+              Finish every warehouse scan before approving.
             </span>
           ) : null}
         </div>
@@ -428,14 +386,11 @@ export default function ProjectLogisticsScanPage({
           <p className="mt-2 text-sm text-[color:var(--danger)]">
             {fulfillMut.error instanceof Error
               ? fulfillMut.error.message
-              : 'Activation failed'}
+              : 'Approval failed'}
           </p>
         )}
       </section>
       </div>
-      <PackingLabelPrintSheet
-        items={mapOrderItemsToPackingLabels(data.items)}
-      />
     </>
   );
 }

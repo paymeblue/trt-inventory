@@ -99,13 +99,23 @@ export default function LogisticsApprovalsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Awaiting logistics</h1>
-        <p className="text-sm text-[color:var(--text-muted)]">
-          This is the critical warehouse step: scan every packing QR here before
-          activating. Receivers reuse the same stickers on site only after you
-          finish this list.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold">Awaiting logistics</h1>
+          <p className="text-sm text-[color:var(--text-muted)]">
+            This is the critical warehouse step: scan every packing QR here before
+            activating. Receivers reuse the same stickers on site only after you
+            finish this list.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          disabled={isPending}
+          onClick={() => void refetch()}
+        >
+          {isPending ? "Refreshing…" : "↻ Refresh"}
+        </button>
       </div>
 
       {error && (

@@ -41,14 +41,23 @@ export async function GET(
       where: eq(projects.id, id),
     });
     if (!project) return jsonError(404, "Project not found");
-    if (
-      auth.actor.role === "installer" &&
-      project.approvalStatus !== "active"
-    ) {
-      return jsonError(
-        403,
-        "This project is not visible until logistics marks it active.",
-      );
+    if (auth.actor.role === "installer") {
+      if (project.approvalStatus !== "active") {
+        return jsonError(
+          403,
+          "This project is not visible until logistics marks it active.",
+        );
+      }
+      const deliveryOrder = await db.query.orders.findFirst({
+        where: and(eq(orders.projectId, id), eq(orders.isLogisticsGate, false)),
+        columns: { id: true },
+      });
+      if (!deliveryOrder) {
+        return jsonError(
+          403,
+          "This project is not visible until the PM creates a delivery order.",
+        );
+      }
     }
 
     const [itemRows, categoryRows, projectOrders] = await Promise.all([
@@ -83,7 +92,14 @@ export async function GET(
       db
         .select()
         .from(orders)
-        .where(eq(orders.projectId, id))
+        .where(
+          and(
+            eq(orders.projectId, id),
+            ...(auth.actor.role === "logistics" || auth.actor.role === "super_admin"
+              ? []
+              : [eq(orders.isLogisticsGate, false)]),
+          ),
+        )
         .orderBy(asc(orders.createdAt)),
     ]);
 

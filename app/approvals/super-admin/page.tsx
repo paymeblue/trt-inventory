@@ -10,6 +10,7 @@ import { invalidateAllApprovalSurface, queryKeys } from "@/lib/query-keys";
 import { useAuthedUser } from "@/components/session-context";
 import { PageLoading } from "@/components/page-loading";
 import { QrCodeLoader } from "@/components/qr-code-loader";
+import { useToast } from "@/components/toast";
 
 interface QueueRow {
   id: string;
@@ -41,6 +42,7 @@ interface MetaQueueRow {
 export default function SuperAdminApprovalsPage() {
   const user = useAuthedUser();
   const qc = useQueryClient();
+  const { showActionToast } = useToast();
   const cancelRef = useRef<HTMLButtonElement>(null);
   const [approveTargetId, setApproveTargetId] = useState<string | null>(null);
 
@@ -88,7 +90,14 @@ export default function SuperAdminApprovalsPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: vars.action }),
       }),
-    onSuccess: async () => {
+    onSuccess: async (_data, vars) => {
+      if (vars.action === "super_admin_approve") {
+        const name = approvePreviewQuery.data?.project.name ?? "The project";
+        showActionToast(
+          `${name} approved. Print the barcodes and hand the boxes to logistics.`,
+          { label: "Print barcodes", href: `/projects/${vars.id}/print-barcodes` },
+        );
+      }
       await invalidateAllApprovalSurface(qc);
       setApproveTargetId(null);
     },
@@ -157,12 +166,22 @@ export default function SuperAdminApprovalsPage() {
           </div>
         )}
 
-      <div>
-        <h1 className="text-2xl font-semibold">Pending creation approval</h1>
-        <p className="text-sm text-[color:var(--text-muted)]">
-          New projects stay hidden from installers until you approve and
-          logistics fulfills stock.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold">Pending creation approval</h1>
+          <p className="text-sm text-[color:var(--text-muted)]">
+            New projects stay hidden from installers until you approve and
+            logistics fulfills stock.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          disabled={isPending}
+          onClick={() => void refetch()}
+        >
+          {isPending ? "Refreshing…" : "↻ Refresh"}
+        </button>
       </div>
 
       {error && (
@@ -377,9 +396,10 @@ export default function SuperAdminApprovalsPage() {
                     ))}
                   </ul>
                   {previewRows.length === 0 ? (
-                    <p className="mt-4 text-sm text-[color:var(--text-muted)]">
-                      This project has no items yet.
-                    </p>
+                    <div className="mt-4 rounded-xl border border-[color:var(--danger)]/40 bg-red-50 p-3 text-sm text-[color:var(--danger)] dark:bg-red-950/40">
+                      <strong>Cannot approve:</strong> this project has no items.
+                      Add items to the project before approving it for logistics.
+                    </div>
                   ) : null}
                   {totalPackingLines === 0 && previewRows.length > 0 ? (
                     <p className="mt-4 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface-muted)] p-3 text-sm">
@@ -417,7 +437,8 @@ export default function SuperAdminApprovalsPage() {
                   act.isPending ||
                   approvePreviewQuery.isPending ||
                   approvePreviewQuery.isError ||
-                  !approveTargetId
+                  !approveTargetId ||
+                  previewRows.length === 0
                 }
                 onClick={() =>
                   approveTargetId &&

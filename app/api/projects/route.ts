@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { asc, count, eq, inArray, sql } from "drizzle-orm";
+import { count, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { orders, products, projects, stockMovements } from "@/db/schema";
+import { orders, products, projects, stockMovements, users } from "@/db/schema";
 import { DEFAULT_GEOFENCE_RADIUS_M } from "@/lib/geofence";
 import { applyCreateProjectInventory } from "@/lib/project-create-inventory";
 import { requireUser, requireUserAny } from "@/lib/auth-guard";
@@ -60,11 +60,11 @@ export async function GET(req: NextRequest) {
           .select(baseSelect)
           .from(projects)
           .where(whereRole)
-          .orderBy(asc(projects.name))
+          .orderBy(desc(projects.createdAt))
       : await db
           .select(baseSelect)
           .from(projects)
-          .orderBy(asc(projects.name));
+          .orderBy(desc(projects.createdAt));
     const [itemRollups, orderRollups] = await Promise.all([
       db
         .select({
@@ -95,6 +95,20 @@ export async function GET(req: NextRequest) {
     );
 
     let payload = enriched;
+    if (actor.role === "installer") {
+      // Receivers only see a project once the PM has created a delivery
+      // order on it — activation alone is not enough.
+      const deliveryRows = await db
+        .selectDistinct({ projectId: orders.projectId })
+        .from(orders)
+        .where(eq(orders.isLogisticsGate, false));
+      const withDeliveryOrder = new Set(
+        deliveryRows.map((r) => String(r.projectId).toLowerCase()),
+      );
+      payload = payload.filter((p) =>
+        withDeliveryOrder.has(String(p.id).toLowerCase()),
+      );
+    }
     if (forNewOrder) {
       const blocked = await findProjectIdsBlockedForNewOrder();
       payload = enriched.filter(
@@ -129,16 +143,20 @@ export async function POST(req: NextRequest) {
 
     const body = createProjectBodySchema.parse(raw);
 
-    const isPm = auth.actor.role === "pm";
     const hasSite =
       body.siteAddress &&
       body.siteLatitude !== undefined &&
       body.siteLongitude !== undefined;
-    if (isPm && !hasSite) {
-      return jsonError(
-        400,
-        "Project site address is required. Confirm the location before creating the project.",
-      );
+
+    if (body.installerUserId) {
+      const inst = await db.query.users.findFirst({
+        where: eq(users.id, body.installerUserId),
+        columns: { id: true, role: true },
+      });
+      if (!inst) return jsonError(400, "That user does not exist");
+      if (inst.role !== "installer") {
+        return jsonError(400, "Receiver must be a user with the installer role");
+      }
     }
 
     const dupe = findDuplicateSkuInPayload(body.items);
@@ -166,6 +184,7 @@ export async function POST(req: NextRequest) {
             description: body.description ?? null,
             createdById: auth.actor.userId,
             approvalStatus: "pending_super_admin",
+            installerUserId: body.installerUserId ?? null,
             ...(hasSite
               ? {
                   siteAddress: body.siteAddress!,

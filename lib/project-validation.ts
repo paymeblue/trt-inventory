@@ -89,6 +89,7 @@ export const createProjectBodySchema = z
   .object({
     name: z.string().trim().min(1, "Project name is required").max(120),
     description: z.string().trim().max(500).optional(),
+    installerUserId: z.string().uuid().optional().nullable(),
     items: z
       .array(projectItemInputSchema)
       .max(200, "At most 200 items per request")

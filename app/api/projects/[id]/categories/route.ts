@@ -5,14 +5,9 @@ import { db } from "@/db";
 import { projectCategories, projects } from "@/db/schema";
 import { requireUserAny } from "@/lib/auth-guard";
 import { handleError, jsonError } from "@/lib/api";
-import { METADATA_PENDING_SUPER_ADMIN } from "@/lib/metadata-stages";
-import { projectLivesOnSite } from "@/lib/project-live";
-import { mergeProjectPendingPatch } from "@/lib/project-pending-patch";
 
 const createSchema = z.object({
   name: z.string().trim().min(1).max(120),
-  /** Physical units to add when logistics applies the change (default 1). */
-  quantity: z.coerce.number().int().min(1).max(500).optional(),
 });
 
 /**
@@ -73,28 +68,6 @@ export async function POST(
       return jsonError(
         409,
         `A category named "${body.name}" already exists in this project`,
-      );
-    }
-
-    const quantity = body.quantity ?? 1;
-    const livesOnSite = projectLivesOnSite(project.approvalStatus);
-
-    if (livesOnSite && auth.actor.role === "pm") {
-      const merged = mergeProjectPendingPatch(project.pendingPatch, {
-        categoryAdds: [{ name: body.name.trim(), quantity }],
-      });
-      const [updated] = await db
-        .update(projects)
-        .set({
-          pendingPatch: merged,
-          metadataChangeStage: METADATA_PENDING_SUPER_ADMIN,
-          updatedAt: new Date(),
-        })
-        .where(eq(projects.id, projectId))
-        .returning();
-      return NextResponse.json(
-        { queuedForApproval: true as const, project: updated },
-        { status: 202 },
       );
     }
 

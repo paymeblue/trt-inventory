@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
-import { requireUser } from "@/lib/auth-guard";
+import { requireUserAny } from "@/lib/auth-guard";
 import { handleError, jsonError } from "@/lib/api";
 import { instrumentRouteHandler } from "@/lib/observability/instrument";
 import { resolveOnSiteScanTarget } from "@/lib/resolve-onsite-scan";
@@ -8,8 +8,6 @@ import { executeScan } from "@/lib/scan-execute";
 
 const scanSchema = z.object({
   barcode: z.string().trim().min(1),
-  latitude: z.number().finite().min(-90).max(90).optional(),
-  longitude: z.number().finite().min(-180).max(180).optional(),
 });
 
 async function handlePost(
@@ -17,14 +15,11 @@ async function handlePost(
   ctx?: { params: Promise<{ id: string }> },
 ) {
   if (!ctx) return jsonError(500, "Missing route context");
-  const auth = await requireUser("installer");
+  // Fulfillment is the receiver's job; super-admin can always override.
+  const auth = await requireUserAny(["installer", "super_admin"]);
   if ("error" in auth) return auth.error;
   try {
     const body = scanSchema.parse(await req.json());
-    const scanLocation =
-      body.latitude !== undefined && body.longitude !== undefined
-        ? { latitude: body.latitude, longitude: body.longitude }
-        : undefined;
 
     const target = await resolveOnSiteScanTarget(body.barcode);
     if (!target) {
@@ -44,7 +39,6 @@ async function handlePost(
       orderId: target.orderId,
       barcode: target.itemBarcode,
       actor: auth.actor,
-      scanLocation,
     });
 
     if (result.kind === "order_not_found") {
@@ -82,24 +76,6 @@ async function handlePost(
       return jsonError(
         403,
         `On-site verification is not open for SKU ${result.sku} yet. Logistics must finish Warehouse scan for this project before receivers can verify.`,
-      );
-    }
-    if (result.kind === "site_not_configured") {
-      return jsonError(
-        403,
-        "This project has no site address yet. Ask your PM to set the project site before on-site scans.",
-      );
-    }
-    if (result.kind === "geofence_location_required") {
-      return jsonError(
-        403,
-        "Turn on location for this device. Scans must be recorded at the project site.",
-      );
-    }
-    if (result.kind === "geofence_violation") {
-      return jsonError(
-        403,
-        `You are about ${result.distanceMeters} m from the project site (limit ${result.radiusMeters} m). Move to the correct location to scan.`,
       );
     }
 

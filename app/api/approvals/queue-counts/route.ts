@@ -54,6 +54,8 @@ export async function GET() {
     return NextResponse.json({
       superAdminProjects: nSa,
       logisticsProjects: nLog,
+      /** pending_logistics count — PMs use this to know they must print barcodes. */
+      pmPrintQueue: logisticsNew ?? 0,
       /** Open disputes needing triage (badge on Disputes nav). */
       superAdminDisputes: disputesOpen ?? 0,
       breakdown: {

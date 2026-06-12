@@ -10,16 +10,9 @@ import {
 } from "@/db/schema";
 import { isBarcodeWarehouseVerified } from "@/lib/barcode-warehouse-verification";
 import { logOrderCompleteEvent } from "@/lib/order-complete-event";
-import {
-  distanceMeters,
-  isWithinGeofence,
-  projectHasGeofence,
-} from "@/lib/geofence";
 import { projectReadyForOnSiteVerification } from "@/lib/project-live";
 import { computeProgress, resolveScan, type ScanOutcome } from "@/lib/scan";
 import type { AuthenticatedActor } from "@/lib/auth-guard";
-
-export type ScanLocation = { latitude: number; longitude: number };
 
 export type ScanExecuteError =
   | { kind: "order_not_found" }
@@ -31,13 +24,7 @@ export type ScanExecuteError =
   /** Gate-order line must be scanned in the warehouse before on-site scans. */
   | { kind: "logistics_not_verified"; sku: string }
   /** Delivery orders only — logistics gate shipment is warehouse-only. */
-  | { kind: "not_delivery_order" }
-  /** In-app scan without GPS when the project has a geofence anchor. */
-  | { kind: "geofence_location_required" }
-  /** Scan coordinates are outside the project site radius. */
-  | { kind: "geofence_violation"; distanceMeters: number; radiusMeters: number }
-  /** Project has no site address — on-site scans are blocked. */
-  | { kind: "site_not_configured" };
+  | { kind: "not_delivery_order" };
 
 export interface ScanExecuteSuccess {
   kind: "ok";
@@ -70,13 +57,10 @@ export async function executeScan({
   orderId,
   barcode,
   actor,
-  scanLocation,
 }: {
   orderId: string;
   barcode: string;
   actor: AuthenticatedActor;
-  /** Required for in-app installer scans when the project has a site geofence. */
-  scanLocation?: ScanLocation | null;
 }): Promise<ScanExecuteResult> {
   const result = await db.transaction(async (tx): Promise<ScanExecuteResult> => {
     const order = await tx.query.orders.findFirst({
@@ -91,14 +75,12 @@ export async function executeScan({
       columns: {
         approvalStatus: true,
         installerUserId: true,
-        siteLatitude: true,
-        siteLongitude: true,
-        geofenceRadiusMeters: true,
       },
     });
     if (
       project?.installerUserId &&
       !actor.isPrintedScan &&
+      actor.role !== "super_admin" &&
       actor.userId !== project.installerUserId
     ) {
       return { kind: "installer_not_assigned" };
@@ -147,53 +129,9 @@ export async function executeScan({
 
       const fkUserId = actor.isPrintedScan ? null : actor.userId;
 
-      const installerInApp = !actor.isPrintedScan;
-      let geofenceFlagged = false;
-      let scanLat: number | null = null;
-      let scanLng: number | null = null;
-
-      if (installerInApp) {
-        if (!project || !projectHasGeofence(project)) {
-          return { kind: "site_not_configured" };
-        }
-        if (!scanLocation) {
-          return { kind: "geofence_location_required" };
-        }
-        scanLat = scanLocation.latitude;
-        scanLng = scanLocation.longitude;
-        const radius = project.geofenceRadiusMeters ?? 500;
-        const inside = isWithinGeofence(
-          project.siteLatitude!,
-          project.siteLongitude!,
-          scanLat,
-          scanLng,
-          radius,
-        );
-        if (!inside) {
-          const dist = distanceMeters(
-            project.siteLatitude!,
-            project.siteLongitude!,
-            scanLat,
-            scanLng,
-          );
-          return {
-            kind: "geofence_violation",
-            distanceMeters: Math.round(dist),
-            radiusMeters: radius,
-          };
-        }
-      } else if (scanLocation && project && projectHasGeofence(project)) {
-        scanLat = scanLocation.latitude;
-        scanLng = scanLocation.longitude;
-        const radius = project.geofenceRadiusMeters ?? 500;
-        geofenceFlagged = !isWithinGeofence(
-          project.siteLatitude!,
-          project.siteLongitude!,
-          scanLat,
-          scanLng,
-          radius,
-        );
-      }
+      const geofenceFlagged = false;
+      const scanLat: number | null = null;
+      const scanLng: number | null = null;
 
       const [prodRow] = await tx
         .update(products)
