@@ -6,6 +6,7 @@ import {
   products,
   projects,
   stockMovements,
+  users,
   type Order,
 } from "@/db/schema";
 import { isBarcodeWarehouseVerified } from "@/lib/barcode-warehouse-verification";
@@ -20,7 +21,7 @@ export type ScanExecuteError =
   | { kind: "sku_deleted"; sku: string }
   | { kind: "insufficient_stock"; sku: string }
   /** Logged-in installer is not the project-assigned installer (QR sticker scans excluded). */
-  | { kind: "installer_not_assigned" }
+  | { kind: "installer_not_assigned"; assignedInstallerName: string | null }
   /** Gate-order line must be scanned in the warehouse before on-site scans. */
   | { kind: "logistics_not_verified"; sku: string }
   /** Delivery orders only — logistics gate shipment is warehouse-only. */
@@ -85,7 +86,11 @@ export async function executeScan({
       actor.role !== "super_admin" &&
       actor.userId !== project.installerUserId
     ) {
-      return { kind: "installer_not_assigned" };
+      const assignedInstaller = await tx.query.users.findFirst({
+        where: eq(users.id, project.installerUserId),
+        columns: { name: true },
+      });
+      return { kind: "installer_not_assigned", assignedInstallerName: assignedInstaller?.name ?? null };
     }
 
     await tx.execute(sql`

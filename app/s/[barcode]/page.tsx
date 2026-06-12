@@ -1,6 +1,9 @@
 import Link from 'next/link';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { eq } from 'drizzle-orm';
+import { db } from '@/db';
+import { projects, users } from '@/db/schema';
 import { getCurrentUser, type AuthenticatedActor } from '@/lib/auth-guard';
 import { verifyPrintedScanToken } from '@/lib/printed-scan-token';
 import { runPageWithObservability } from '@/lib/observability/instrument';
@@ -300,11 +303,38 @@ async function scanDeepLinkInner(
   }
 
   if (result.kind === 'installer_not_assigned') {
+    const projectRow = await db.query.projects.findFirst({
+      where: eq(projects.id, target.projectId),
+      columns: { installerUserId: true, createdById: true },
+    });
+    const [assignedInstaller, pm] = await Promise.all([
+      projectRow?.installerUserId
+        ? db.query.users.findFirst({
+            where: eq(users.id, projectRow.installerUserId),
+            columns: { name: true },
+          })
+        : Promise.resolve(null),
+      projectRow?.createdById
+        ? db.query.users.findFirst({
+            where: eq(users.id, projectRow.createdById),
+            columns: { name: true, phone: true, email: true },
+          })
+        : Promise.resolve(null),
+    ]);
+    const parts: string[] = [
+      assignedInstaller?.name
+        ? `This project was assigned to ${assignedInstaller.name}, not you.`
+        : 'This project is locked to a different receiver.',
+    ];
+    if (pm?.phone) parts.push(`Please contact the PM on ${pm.phone}`);
+    if (pm?.email) {
+      parts.push(pm.phone ? `or email ${pm.email}.` : `Please email the PM at ${pm.email}.`);
+    }
     return (
       <OutcomeShell
         status="blocked"
         title="Not the assigned receiver"
-        body="This project is locked to a different receiver. Only the assigned receiver can fulfill this order — ask your PM to assign this route to you."
+        body={parts.join(' ')}
         orderHref={orderHref}
         hideNavigation={hideNavigation}
       />

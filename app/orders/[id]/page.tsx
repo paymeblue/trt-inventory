@@ -55,6 +55,8 @@ interface DetailResponse {
     remaining: number;
     percent: number;
   };
+  assignedInstallerName: string | null;
+  pm: { name: string; phone: string | null; email: string } | null;
 }
 
 interface ProjectDetailResponse {
@@ -256,13 +258,23 @@ export default function OrderDetailPage({
           !isAssignedInstaller &&
           (data.order.status === 'active' ||
             data.order.status === 'anomaly') ? (
-          <div className="card border-[color:var(--warning)] bg-amber-50 p-6 text-sm dark:bg-amber-950/30">
+          <div className="card border-[color:var(--danger)] bg-red-50 p-6 text-sm dark:bg-red-950/30">
             <p className="font-semibold text-[color:var(--text)]">
-              Another installer is assigned to this project
+              {data.assignedInstallerName
+                ? `This project was assigned to ${data.assignedInstallerName}, not you`
+                : 'Another installer is assigned to this project'}
             </p>
             <p className="mt-2 text-[color:var(--text-muted)]">
-              Only the assigned receiver can verify and fulfill this order. Ask
-              your PM to assign you on the project page.
+              {data.pm?.phone || data.pm?.email ? (
+                <>
+                  Please contact the PM
+                  {data.pm.phone ? ` on ${data.pm.phone}` : ''}
+                  {data.pm.phone && data.pm.email ? ' or ' : ''}
+                  {data.pm.email ? `email ${data.pm.email}` : ''}.
+                </>
+              ) : (
+                'Ask your PM to assign this project to you.'
+              )}
             </p>
           </div>
         ) : user.role === 'installer' && isAssignedInstaller ? (

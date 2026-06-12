@@ -1,5 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
+import { db } from "@/db";
+import { projects, users } from "@/db/schema";
 import { requireUserAny } from "@/lib/auth-guard";
 import { handleError, jsonError } from "@/lib/api";
 import { instrumentRouteHandler } from "@/lib/observability/instrument";
@@ -66,16 +69,35 @@ async function handlePost(
       );
     }
     if (result.kind === "installer_not_assigned") {
-      return jsonError(
-        403,
-        "Only the receiver assigned to this project may fulfill this order. Ask your PM to assign you to this project.",
+      const projectRow = await db.query.projects.findFirst({
+        where: eq(projects.id, target.projectId),
+        columns: { createdById: true },
+      });
+      const pm = projectRow?.createdById
+        ? await db.query.users.findFirst({
+            where: eq(users.id, projectRow.createdById),
+            columns: { name: true, phone: true, email: true },
+          })
+        : null;
+      const parts: string[] = [];
+      parts.push(
+        result.assignedInstallerName
+          ? `This project was assigned to ${result.assignedInstallerName}, not you.`
+          : "Only the assigned receiver can fulfill this order.",
       );
+      if (pm?.phone) parts.push(`Please contact the PM on ${pm.phone}`);
+      if (pm?.email) {
+        parts.push(pm.phone ? `or email ${pm.email}.` : `Please email the PM at ${pm.email}.`);
+      } else {
+        parts.push("Please contact your PM.");
+      }
+      return jsonError(403, parts.join(" "));
     }
 
     if (result.kind === "logistics_not_verified") {
       return jsonError(
         403,
-        `On-site verification is not open for SKU ${result.sku} yet. Logistics must finish Warehouse scan for this project before receivers can verify.`,
+        `This project hasn't been activated for on-site fulfillment yet (SKU ${result.sku}). Ask the PM to check that logistics has finished Warehouse scan and approved the project.`,
       );
     }
 

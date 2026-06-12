@@ -246,9 +246,9 @@ export default function ProjectLogisticsScanPage({
           Warehouse scan — {data.project.name}
         </h1>
         <p className="mt-2 text-sm text-[color:var(--text-muted)]">
-          Warehouse verification — scan each packing QR here first. This is
-          required before you activate the project. Receivers scan the same
-          stickers on site only after every line shows Warehouse scanned.
+          Scan each packing QR in the warehouse first. Once every line is
+          verified, approve the project below — the PM then creates a delivery
+          order and receivers fulfil it on site.
         </p>
         {data.project.projectBarcode && (
           <p className="mt-2 text-xs text-[color:var(--text-muted)]">
@@ -362,7 +362,7 @@ export default function ProjectLogisticsScanPage({
         </h2>
         <p className="mt-1 text-xs text-[color:var(--text-muted)]">
           {hasLines
-            ? 'Logistics only verifies packing in the warehouse — fulfillment stays with the receiver on site. When every line is verified, approve the project so the PM can create a delivery order. Receivers only see the project after that order exists.'
+            ? 'Your job ends here — once you approve, the PM creates a delivery order and the assigned receiver fulfils it on site. Receivers do not see the project until that order exists.'
             : 'Approve to release this empty project so the PM can create an order.'}
         </p>
         <div className="mt-4 flex flex-wrap gap-3">

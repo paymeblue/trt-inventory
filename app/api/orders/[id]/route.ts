@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { asc, eq } from 'drizzle-orm';
 import { db } from '@/db';
-import { orderItems, orders, projects } from '@/db/schema';
+import { orderItems, orders, projects, users } from '@/db/schema';
 import { requireUser, requireUserAny } from '@/lib/auth-guard';
 import { handleError, jsonError } from '@/lib/api';
 import {
@@ -29,6 +29,21 @@ export async function GET(
         where: eq(orderItems.orderId, id),
         orderBy: [asc(orderItems.createdAt)],
       }),
+    ]);
+
+    const [assignedInstaller, pm] = await Promise.all([
+      project?.installerUserId
+        ? db.query.users.findFirst({
+            where: eq(users.id, project.installerUserId),
+            columns: { name: true },
+          })
+        : Promise.resolve(null),
+      project?.createdById
+        ? db.query.users.findFirst({
+            where: eq(users.id, project.createdById),
+            columns: { name: true, phone: true, email: true },
+          })
+        : Promise.resolve(null),
     ]);
 
     if (
@@ -74,6 +89,8 @@ export async function GET(
       project,
       items: itemsOut,
       progress: computeProgress(items),
+      assignedInstallerName: assignedInstaller?.name ?? null,
+      pm: pm ? { name: pm.name, phone: pm.phone ?? null, email: pm.email } : null,
     });
   } catch (err) {
     return handleError(err);
