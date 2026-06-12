@@ -14,10 +14,10 @@ describe("PACKING_LABEL", () => {
 });
 
 describe("packing label access", () => {
-  it("allows pm, super_admin, and logistics to print", () => {
+  it("allows only pm and super_admin to print — stickers are hidden from logistics and receivers", () => {
     expect(canPrintPackingLabels("pm")).toBe(true);
     expect(canPrintPackingLabels("super_admin")).toBe(true);
-    expect(canPrintPackingLabels("logistics")).toBe(true);
+    expect(canPrintPackingLabels("logistics")).toBe(false);
     expect(canPrintPackingLabels("installer")).toBe(false);
   });
 });

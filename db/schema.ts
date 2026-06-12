@@ -254,6 +254,8 @@ export const orderItems = pgTable(
     geofenceFlagged: boolean("geofence_flagged").notNull().default(false),
     logisticsScanLatitude: doublePrecision("logistics_scan_latitude"),
     logisticsScanLongitude: doublePrecision("logistics_scan_longitude"),
+    /** PM printed the physical sticker for this line (print-barcodes page). */
+    labelPrintedAt: timestamp("label_printed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

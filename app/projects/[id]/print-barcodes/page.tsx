@@ -1,16 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { use } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { use, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/fetch-json";
 import { queryKeys } from "@/lib/query-keys";
 import { useAuthedUser } from "@/components/session-context";
 import { PageLoading } from "@/components/page-loading";
 import { PackingLabelPrintSheet } from "@/components/packing-label";
 import { PackingLabelPreview } from "@/components/packing-label-preview";
-import { PrintPackingLabelsButton } from "@/components/print-packing-labels-button";
 import { mapOrderItemsToPackingLabels } from "@/lib/packing-label-items";
+import { printPackingLabels } from "@/lib/print-packing-labels";
 import type { Order, OrderItem, Project } from "@/db/schema";
 
 type OrderItemOut = OrderItem & {
@@ -37,12 +37,36 @@ export default function PrintBarcodesPage({
 }) {
   const { id: projectId } = use(params);
   const user = useAuthedUser();
+  const qc = useQueryClient();
+
+  // Per-label selection. Defaults to "everything not yet printed"; user
+  // toggles are kept as overrides so the default can shift after a print
+  // without fighting the user's explicit choices.
+  const [overrides, setOverrides] = useState<Record<string, boolean>>({});
 
   const query = useQuery({
     queryKey: queryKeys.logisticsGate(projectId),
     queryFn: () =>
       fetchJson<GatePayload>(`/api/projects/${projectId}/logistics-gate`),
     enabled: user?.role === "pm" || user?.role === "super_admin",
+  });
+
+  const markPrinted = useMutation({
+    mutationFn: (itemIds: string[]) =>
+      fetchJson<{ printed: number }>(
+        `/api/projects/${projectId}/logistics-gate/printed`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ itemIds }),
+        },
+      ),
+    onSuccess: async () => {
+      setOverrides({});
+      await qc.invalidateQueries({
+        queryKey: queryKeys.logisticsGate(projectId),
+      });
+    },
   });
 
   if (!user) return null;
@@ -70,6 +94,36 @@ export default function PrintBarcodesPage({
   }
 
   const data = query.data;
+  const items = data.items;
+
+  const isSelected = (it: OrderItemOut) =>
+    overrides[it.id] ?? it.labelPrintedAt == null;
+  const selectedItems = items.filter(isSelected);
+  const printedCount = items.filter((it) => it.labelPrintedAt != null).length;
+  const remainingCount = items.length - printedCount;
+
+  function toggle(it: OrderItemOut) {
+    setOverrides((prev) => ({ ...prev, [it.id]: !isSelected(it) }));
+  }
+
+  function setAll(selected: boolean) {
+    setOverrides(
+      Object.fromEntries(items.map((it) => [it.id, selected])),
+    );
+  }
+
+  function printSelected() {
+    const ids = selectedItems.map((it) => it.id);
+    if (ids.length === 0) return;
+    // The print dialog blocks the page; once it closes, record the labels
+    // as printed so the remaining count decrements.
+    window.addEventListener(
+      "afterprint",
+      () => markPrinted.mutate(ids),
+      { once: true },
+    );
+    printPackingLabels();
+  }
 
   return (
     <>
@@ -93,13 +147,22 @@ export default function PrintBarcodesPage({
               Print barcodes — {data.project.name}
             </h1>
             <p className="mt-1 text-sm text-[color:var(--text-muted)]">
-              Print these stickers and attach one to each physical box. Hand the
-              boxes to logistics — they must scan each sticker from the physical
-              box to activate the project.
+              Tick the labels you want, print them, and attach one sticker to
+              each physical box. Hand the boxes to logistics — they must scan
+              each sticker from the physical box to activate the project.
             </p>
           </div>
-          {data.items.length > 0 && (
-            <PrintPackingLabelsButton className="btn btn-primary shrink-0" />
+          {items.length > 0 && (
+            <button
+              type="button"
+              className="btn btn-primary shrink-0"
+              disabled={selectedItems.length === 0 || markPrinted.isPending}
+              onClick={printSelected}
+            >
+              {markPrinted.isPending
+                ? "Saving…"
+                : `Print selected (${selectedItems.length})`}
+            </button>
           )}
         </div>
 
@@ -110,57 +173,104 @@ export default function PrintBarcodesPage({
           warehouse receipt.
         </div>
 
-        {data.items.length === 0 ? (
+        {markPrinted.isError && (
+          <div className="rounded-lg border border-[color:var(--danger)] px-4 py-3 text-sm text-[color:var(--danger)]">
+            {markPrinted.error instanceof Error
+              ? markPrinted.error.message
+              : "Could not record the printed labels."}
+          </div>
+        )}
+
+        {items.length === 0 ? (
           <div className="card p-6 text-center text-sm text-[color:var(--text-muted)]">
             No items found for this project. Add items before printing.
           </div>
         ) : (
           <section className="card overflow-hidden">
-            <header className="flex items-center justify-between border-b border-[color:var(--border)] px-5 py-3">
+            <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[color:var(--border)] px-5 py-3">
               <span className="text-sm font-semibold">
-                Packing labels ({data.items.length})
+                {remainingCount === 0
+                  ? `All ${items.length} labels printed`
+                  : `${remainingCount} of ${items.length} labels left to print`}
               </span>
-              <PrintPackingLabelsButton className="btn btn-ghost btn-sm" />
+              <span className="flex gap-2">
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setAll(true)}
+                >
+                  Select all
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setAll(false)}
+                >
+                  Clear
+                </button>
+              </span>
             </header>
             <ul className="divide-y divide-[color:var(--border)]">
-              {data.items.map((it) => (
-                <li
-                  key={it.id}
-                  className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-start"
-                >
-                  <div className="no-print shrink-0">
-                    <PackingLabelPreview
-                      item={{
-                        barcode: it.barcode,
-                        productId: it.productId,
-                        productName: it.productName,
-                        printedScanToken: it.printedScanToken,
-                      }}
-                      zoom={2}
-                    />
-                  </div>
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <div className="font-mono text-sm font-semibold">
-                      {it.productId}
-                    </div>
-                    {it.productName && (
-                      <div className="text-xs text-[color:var(--text-muted)]">
-                        {it.productName}
+              {items.map((it) => {
+                const selected = isSelected(it);
+                return (
+                  <li
+                    key={it.id}
+                    className={`flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-start ${
+                      selected ? "" : "opacity-60"
+                    }`}
+                  >
+                    <label className="flex shrink-0 cursor-pointer items-start gap-3">
+                      <input
+                        type="checkbox"
+                        className="mt-1 h-5 w-5 accent-[color:var(--primary)]"
+                        checked={selected}
+                        onChange={() => toggle(it)}
+                        aria-label={`Print label for ${it.productId}`}
+                      />
+                      <span className="no-print">
+                        <PackingLabelPreview
+                          item={{
+                            barcode: it.barcode,
+                            productId: it.productId,
+                            productName: it.productName,
+                            printedScanToken: it.printedScanToken,
+                          }}
+                          zoom={2}
+                        />
+                      </span>
+                    </label>
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-mono text-sm font-semibold">
+                          {it.productId}
+                        </span>
+                        {it.labelPrintedAt != null && (
+                          <span className="pill pill-fulfilled text-[10px]">
+                            Printed{" "}
+                            {new Date(it.labelPrintedAt).toLocaleString()}
+                          </span>
+                        )}
                       </div>
-                    )}
-                    <div className="truncate font-mono text-xs text-[color:var(--text-muted)]">
-                      {it.barcode}
+                      {it.productName && (
+                        <div className="text-xs text-[color:var(--text-muted)]">
+                          {it.productName}
+                        </div>
+                      )}
+                      <div className="truncate font-mono text-xs text-[color:var(--text-muted)]">
+                        {it.barcode}
+                      </div>
                     </div>
-                  </div>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ul>
           </section>
         )}
       </div>
 
       <PackingLabelPrintSheet
-        items={mapOrderItemsToPackingLabels(data.items)}
+        items={mapOrderItemsToPackingLabels(selectedItems)}
       />
     </>
   );

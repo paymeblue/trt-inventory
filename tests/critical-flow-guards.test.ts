@@ -93,6 +93,18 @@ describe("stickers are PM / super-admin only", () => {
     const src = load("app/projects/[id]/print-barcodes/page.tsx");
     expect(src).toContain('user.role !== "pm" && user.role !== "super_admin"');
   });
+
+  it("marking labels printed is PM / super-admin only", () => {
+    const src = load("app/api/projects/[id]/logistics-gate/printed/route.ts");
+    expect(src).toMatch(/requireUserAny\(\["pm", "super_admin"\]\)/);
+  });
+
+  it("print page lets the PM pick exact barcodes and decrements after print", () => {
+    const src = load("app/projects/[id]/print-barcodes/page.tsx");
+    expect(src).toContain("Print selected");
+    expect(src).toContain("labels left to print");
+    expect(src).toContain("labelPrintedAt");
+  });
 });
 
 describe("receiver visibility requires a PM delivery order", () => {

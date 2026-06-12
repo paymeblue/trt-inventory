@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { useNetworkState } from "@uidotdev/usehooks";
 import {
   computeNetworkSignal,
@@ -12,7 +12,24 @@ function barActive(bars: SignalBars, index: number): boolean {
   return index < bars;
 }
 
+const emptySubscribe = () => () => {};
+
+/**
+ * `useNetworkState` throws when called during server rendering, which
+ * turned every authenticated page into a 500 that only recovered after
+ * client hydration. Defer the hook to a child that renders client-only.
+ */
 export function NetworkIndicator() {
+  const mounted = useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false,
+  );
+  if (!mounted) return null;
+  return <NetworkIndicatorClient />;
+}
+
+function NetworkIndicatorClient() {
   const network = useNetworkState();
   const { bars, caption, label } = useMemo(() => computeNetworkSignal(network), [network]);
 

@@ -42,7 +42,7 @@ interface MetaQueueRow {
 export default function SuperAdminApprovalsPage() {
   const user = useAuthedUser();
   const qc = useQueryClient();
-  const { showActionToast } = useToast();
+  const { showToast, showActionToast } = useToast();
   const cancelRef = useRef<HTMLButtonElement>(null);
   const [approveTargetId, setApproveTargetId] = useState<string | null>(null);
 
@@ -100,6 +100,15 @@ export default function SuperAdminApprovalsPage() {
       }
       await invalidateAllApprovalSurface(qc);
       setApproveTargetId(null);
+    },
+    onError: (err) => {
+      // Never leave the super-admin staring at a stuck modal: close it
+      // and say exactly what failed.
+      setApproveTargetId(null);
+      showToast(
+        err instanceof Error ? err.message : "Approval failed — try again.",
+        "error",
+      );
     },
   });
 

@@ -94,9 +94,28 @@ describe("project approval → print → verify → order → receive", () => {
 
     cy.url().should("include", `/projects/${projectId}/print-barcodes`);
     cy.contains(`Print barcodes — ${projectName}`).should("be.visible");
-    cy.contains("button", "Print labels (1.5×1 in)").should("be.visible");
     cy.contains("E2E Box A").should("exist");
     cy.contains("E2E Box B").should("exist");
+
+    // PM selects exactly which barcodes to print; the remaining count
+    // decrements once the labels are recorded as printed.
+    cy.contains("2 of 2 labels left to print").should("be.visible");
+    cy.get('input[type="checkbox"]').should("have.length", 2);
+    cy.get('input[type="checkbox"]').first().uncheck();
+    cy.contains("button", "Print selected (1)").should("be.enabled");
+
+    cy.window().then((win) => {
+      cy.stub(win, "print").as("print");
+    });
+    cy.contains("button", "Print selected (1)").click();
+    cy.get("@print").should("have.been.called");
+    cy.window().then((win) =>
+      win.dispatchEvent(new win.Event("afterprint")),
+    );
+
+    cy.contains("1 of 2 labels left to print").should("be.visible");
+    cy.contains(/^Printed /).should("exist");
+    cy.contains("button", "Print selected (1)").should("be.enabled");
   });
 
   it("receiver cannot see the project before any delivery order exists", () => {
