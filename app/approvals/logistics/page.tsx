@@ -1,11 +1,11 @@
-"use client";
+'use client';
 
-import Link from "next/link";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchJson } from "@/lib/fetch-json";
-import { invalidateAllApprovalSurface, queryKeys } from "@/lib/query-keys";
-import { useAuthedUser } from "@/components/session-context";
-import { PageLoading } from "@/components/page-loading";
+import Link from 'next/link';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { fetchJson } from '@/lib/fetch-json';
+import { invalidateAllApprovalSurface, queryKeys } from '@/lib/query-keys';
+import { useAuthedUser } from '@/components/session-context';
+import { PageLoading } from '@/components/page-loading';
 
 interface QueueRow {
   id: string;
@@ -33,26 +33,26 @@ export default function LogisticsApprovalsPage() {
     queryKey: queryKeys.approvalsLogistics,
     queryFn: () =>
       fetchJson<{ projects: QueueRow[] }>(
-        "/api/approvals/projects?queue=logistics",
+        '/api/approvals/projects?queue=logistics',
       ),
-    enabled: user?.role === "logistics" || user?.role === "super_admin",
+    enabled: user?.role === 'logistics' || user?.role === 'super_admin',
   });
 
   const metaQuery = useQuery({
     queryKey: queryKeys.approvalsLogisticsMetadata,
     queryFn: () =>
       fetchJson<{ projects: LogisticsMetaRow[] }>(
-        "/api/approvals/projects?queue=logistics_metadata",
+        '/api/approvals/projects?queue=logistics_metadata',
       ),
-    enabled: user?.role === "logistics" || user?.role === "super_admin",
+    enabled: user?.role === 'logistics' || user?.role === 'super_admin',
   });
 
   const rejectMut = useMutation({
     mutationFn: (projectId: string) =>
       fetchJson(`/api/projects/${projectId}/approval`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "logistics_reject" }),
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'logistics_reject' }),
       }),
     onSuccess: () => invalidateAllApprovalSurface(qc),
   });
@@ -60,9 +60,9 @@ export default function LogisticsApprovalsPage() {
   const applyMetaMut = useMutation({
     mutationFn: (projectId: string) =>
       fetchJson(`/api/projects/${projectId}/approval`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "logistics_apply_patch" }),
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'logistics_apply_patch' }),
       }),
     onSuccess: () => invalidateAllApprovalSurface(qc),
   });
@@ -70,15 +70,15 @@ export default function LogisticsApprovalsPage() {
   const rejectMetaMut = useMutation({
     mutationFn: (projectId: string) =>
       fetchJson(`/api/projects/${projectId}/approval`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "logistics_reject_metadata_change" }),
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'logistics_reject_metadata_change' }),
       }),
     onSuccess: () => invalidateAllApprovalSurface(qc),
   });
 
   if (!user) return null;
-  if (user.role !== "logistics" && user.role !== "super_admin") {
+  if (user.role !== 'logistics' && user.role !== 'super_admin') {
     return (
       <div className="card p-6">
         <h1 className="text-lg font-semibold">Awaiting logistics</h1>
@@ -93,8 +93,8 @@ export default function LogisticsApprovalsPage() {
   const metaRows = metaQuery.data?.projects ?? [];
 
   function patchKeys(raw: unknown): string {
-    if (!raw || typeof raw !== "object") return "";
-    return Object.keys(raw as object).join(", ");
+    if (!raw || typeof raw !== 'object') return '';
+    return Object.keys(raw as object).join(', ');
   }
 
   return (
@@ -103,9 +103,9 @@ export default function LogisticsApprovalsPage() {
         <div>
           <h1 className="text-2xl font-semibold">Awaiting logistics</h1>
           <p className="text-sm text-[color:var(--text-muted)]">
-            This is the critical warehouse step: scan every packing QR here before
-            activating. Receivers reuse the same stickers on site only after you
-            finish this list.
+            This is the critical warehouse step: scan every packing QR here
+            before activating. Receivers reuse the same stickers on site only
+            after you finish this list.
           </p>
         </div>
         <button
@@ -114,14 +114,18 @@ export default function LogisticsApprovalsPage() {
           disabled={isPending}
           onClick={() => void refetch()}
         >
-          {isPending ? "Refreshing…" : "↻ Refresh"}
+          {isPending ? 'Refreshing…' : '↻ Refresh'}
         </button>
       </div>
 
       {error && (
         <div className="card border-[color:var(--danger)] p-4 text-sm text-[color:var(--danger)]">
           {(error as Error).message}
-          <button type="button" className="btn btn-ghost ml-4" onClick={() => refetch()}>
+          <button
+            type="button"
+            className="btn btn-ghost ml-4"
+            onClick={() => refetch()}
+          >
             Retry
           </button>
         </div>
@@ -130,7 +134,9 @@ export default function LogisticsApprovalsPage() {
       {isPending ? (
         <PageLoading message="Loading logistics queue…" />
       ) : rows.length === 0 ? (
-        <p className="text-sm text-[color:var(--text-muted)]">Nothing waiting.</p>
+        <p className="text-sm text-[color:var(--text-muted)]">
+          Nothing waiting.
+        </p>
       ) : (
         <ul className="space-y-3">
           {rows.map((p) => (
@@ -148,7 +154,7 @@ export default function LogisticsApprovalsPage() {
                   </div>
                   {p.projectBarcode && (
                     <div className="mt-2 font-mono text-xs">
-                      Project barcode:{" "}
+                      Project barcode:{' '}
                       <span className="font-semibold">{p.projectBarcode}</span>
                     </div>
                   )}
@@ -158,7 +164,7 @@ export default function LogisticsApprovalsPage() {
                     href={`/projects/${p.id}/logistics-scan`}
                     className="btn btn-primary btn-sm"
                   >
-                    Scan warehouse QRs
+                    Approve Project
                   </Link>
                   <button
                     type="button"
@@ -187,7 +193,11 @@ export default function LogisticsApprovalsPage() {
           </p>
         ) : null}
         {metaQuery.isPending ? (
-          <PageLoading message="Loading metadata queue…" centered={false} className="mt-4" />
+          <PageLoading
+            message="Loading metadata queue…"
+            centered={false}
+            className="mt-4"
+          />
         ) : metaRows.length === 0 ? (
           <p className="mt-4 text-sm text-[color:var(--text-muted)]">
             No pending updates.
@@ -214,7 +224,7 @@ export default function LogisticsApprovalsPage() {
                         </span>
                       ) : null}
                       {p.pendingDeleteRequested && patchKeys(p.pendingPatch)
-                        ? " · "
+                        ? ' · '
                         : null}
                       {patchKeys(p.pendingPatch) ? (
                         <span>Updates: {patchKeys(p.pendingPatch)}</span>
