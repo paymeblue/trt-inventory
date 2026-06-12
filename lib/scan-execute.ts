@@ -77,9 +77,11 @@ export async function executeScan({
         installerUserId: true,
       },
     });
+    // Fulfillment is locked to the assigned receiver when one is set.
+    // No printed-sticker bypass: the sticker token never authorises
+    // fulfillment, only a logged-in receiver (or super-admin) does.
     if (
       project?.installerUserId &&
-      !actor.isPrintedScan &&
       actor.role !== "super_admin" &&
       actor.userId !== project.installerUserId
     ) {

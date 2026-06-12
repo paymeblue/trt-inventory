@@ -68,7 +68,7 @@ async function handlePost(
     if (result.kind === "installer_not_assigned") {
       return jsonError(
         403,
-        "Only the receiver assigned to this project may verify with this login. Use the sticker QR on the box, or ask your PM to assign you.",
+        "Only the receiver assigned to this project may fulfill this order. Ask your PM to assign you to this project.",
       );
     }
 

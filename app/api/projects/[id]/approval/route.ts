@@ -6,7 +6,10 @@ import { orders, products, projects } from "@/db/schema";
 import { requireUserAny } from "@/lib/auth-guard";
 import { generateBarcode } from "@/lib/barcode";
 import { handleError, jsonError } from "@/lib/api";
-import { applyPendingCategoryAdds } from "@/lib/apply-pending-category-adds";
+import {
+  applyPendingCategoryAdds,
+  applyPendingCategoryRenames,
+} from "@/lib/apply-pending-category-adds";
 import { applyPendingItemChanges } from "@/lib/apply-pending-item-changes";
 import { ensureLogisticsGateOrder } from "@/lib/logistics-gate-order";
 import {
@@ -284,6 +287,12 @@ export async function POST(
             projectId: id,
             userId: auth.actor.userId,
             adds: patch.categoryAdds,
+          });
+        }
+        if (patch?.categoryRenames?.length) {
+          await applyPendingCategoryRenames(tx, {
+            projectId: id,
+            renames: patch.categoryRenames,
           });
         }
         if (patch?.itemChanges?.length) {

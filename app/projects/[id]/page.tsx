@@ -485,8 +485,8 @@ function InstallerAssignmentPanel({
     <section className="card p-6">
       <h2 className="text-base font-semibold">Assigned receiver</h2>
       <p className="mt-1 text-xs text-[color:var(--text-muted)]">
-        When set, only that receiver can verify in the app (scans with the
-        printed sticker QR are unchanged).
+        When set, only that receiver can verify and fulfill this project&apos;s
+        orders — nobody else, including sticker QR scans.
       </p>
       <form
         onSubmit={save}
@@ -543,6 +543,44 @@ function CategoriesManageSection({
   const [queuedMsg, setQueuedMsg] = useState<string | null>(null);
   const [delBusy, setDelBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [renameBusy, setRenameBusy] = useState(false);
+
+  async function saveRename(id: string) {
+    const n = renameValue.trim();
+    if (!n) return;
+    setRenameBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/projects/${projectId}/categories/${id}`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: n }),
+        },
+      );
+      const json = (await res.json().catch(() => ({}))) as {
+        queuedForApproval?: boolean;
+        error?: string;
+      };
+      if (!res.ok) throw new Error(json.error ?? "Could not rename category");
+      setQueuedMsg(
+        json.queuedForApproval
+          ? `Rename to “${n}” sent for super-admin approval.`
+          : null,
+      );
+      setRenamingId(null);
+      setRenameValue("");
+      await onChanged();
+      await invalidateWorkspaceBadges(qc);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setRenameBusy(false);
+    }
+  }
 
   async function addCategory(e: React.FormEvent) {
     e.preventDefault();
@@ -672,20 +710,69 @@ function CategoriesManageSection({
             <tbody className="divide-y divide-[color:var(--border)]">
               {categories.map((c) => (
                 <tr key={c.id}>
-                  <td className="px-4 py-3 font-medium">{c.name}</td>
+                  <td className="px-4 py-3 font-medium">
+                    {renamingId === c.id ? (
+                      <input
+                        className="input"
+                        autoFocus
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        maxLength={120}
+                      />
+                    ) : (
+                      c.name
+                    )}
+                  </td>
                   <td className="hidden px-4 py-3 text-[color:var(--text-muted)] sm:table-cell">
                     {new Date(c.createdAt).toLocaleString()}
                   </td>
                   {canEdit ? (
                     <td className="px-4 py-3 text-right">
-                      <button
-                        type="button"
-                        disabled={delBusy !== null}
-                        onClick={() => void removeCategory(c.id, c.name)}
-                        className="btn btn-ghost btn-sm text-[color:var(--danger)]"
-                      >
-                        {delBusy === c.id ? "Removing…" : "Remove"}
-                      </button>
+                      {renamingId === c.id ? (
+                        <span className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            disabled={renameBusy || !renameValue.trim()}
+                            onClick={() => void saveRename(c.id)}
+                            className="btn btn-primary btn-sm"
+                          >
+                            {renameBusy ? "Saving…" : "Save"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={renameBusy}
+                            onClick={() => {
+                              setRenamingId(null);
+                              setRenameValue("");
+                            }}
+                            className="btn btn-ghost btn-sm"
+                          >
+                            Cancel
+                          </button>
+                        </span>
+                      ) : (
+                        <span className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            disabled={delBusy !== null || renameBusy}
+                            onClick={() => {
+                              setRenamingId(c.id);
+                              setRenameValue(c.name);
+                            }}
+                            className="btn btn-ghost btn-sm"
+                          >
+                            Rename
+                          </button>
+                          <button
+                            type="button"
+                            disabled={delBusy !== null || renameBusy}
+                            onClick={() => void removeCategory(c.id, c.name)}
+                            className="btn btn-ghost btn-sm text-[color:var(--danger)]"
+                          >
+                            {delBusy === c.id ? "Removing…" : "Remove"}
+                          </button>
+                        </span>
+                      )}
                     </td>
                   ) : null}
                 </tr>

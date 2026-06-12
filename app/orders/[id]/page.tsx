@@ -34,10 +34,7 @@ import {
 import { ResourceLoadError } from '@/components/resource-load-error';
 import { fetchJson } from '@/lib/fetch-json';
 import { patchOrderDetailFromScan } from '@/lib/patch-order-detail-from-scan';
-import {
-  invalidateWorkspaceOrders,
-  queryKeys,
-} from '@/lib/query-keys';
+import { invalidateWorkspaceOrders, queryKeys } from '@/lib/query-keys';
 import { emitWorkspaceOrdersChanged } from '@/lib/workspace-refresh';
 import type { ScanApiSuccessBody } from '@/lib/scan-client';
 
@@ -186,107 +183,108 @@ export default function OrderDetailPage({
   return (
     <>
       <div className="no-print space-y-6">
-      <nav className="text-xs text-[color:var(--text-muted)]">
-        <Link href="/orders" className="hover:underline">
-          ← Back to orders
-        </Link>
-      </nav>
+        <nav className="text-xs text-[color:var(--text-muted)]">
+          <Link href="/orders" className="hover:underline">
+            ← Back to orders
+          </Link>
+        </nav>
 
-      <header className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold">
-              {data.project ? (
-                <Link
-                  href={`/projects/${data.project.id}`}
-                  className="hover:underline"
-                >
-                  {data.project.name}
-                </Link>
-              ) : (
-                'Unknown project'
+        <header className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-semibold">
+                {data.project ? (
+                  <Link
+                    href={`/projects/${data.project.id}`}
+                    className="hover:underline"
+                  >
+                    {data.project.name}
+                  </Link>
+                ) : (
+                  'Unknown project'
+                )}
+              </h1>
+              <StatusPill status={data.order.status} />
+            </div>
+            <div className="mt-1 text-xs text-[color:var(--text-muted)]">
+              Order ID{' '}
+              <span className="font-mono">{data.order.id.slice(0, 8)}</span> ·
+              created by {data.order.createdBy} on {fmt(data.order.createdAt)}
+              {data.order.fulfilledAt && (
+                <> · fulfilled {fmt(data.order.fulfilledAt)}</>
               )}
-            </h1>
-            <StatusPill status={data.order.status} />
+            </div>
           </div>
-          <div className="mt-1 text-xs text-[color:var(--text-muted)]">
-            Order ID{' '}
-            <span className="font-mono">{data.order.id.slice(0, 8)}</span> ·
-            created by {data.order.createdBy} on {fmt(data.order.createdAt)}
-            {data.order.fulfilledAt && (
-              <> · fulfilled {fmt(data.order.fulfilledAt)}</>
+          <div className="flex flex-wrap gap-2">
+            {canPrintPackingLabels(user.role) && data.items.length > 0 && (
+              <PrintPackingLabelsButton
+                className="btn btn-ghost"
+                data-tour="pm-print"
+              />
+            )}
+            {canEdit && (
+              <button
+                className="btn btn-ghost text-[color:var(--danger)]"
+                onClick={async () => {
+                  if (!confirm('Delete this order?')) return;
+                  const res = await fetch(`/api/orders/${id}`, {
+                    method: 'DELETE',
+                  });
+                  if (res.ok) router.push('/orders');
+                }}
+              >
+                Delete order
+              </button>
             )}
           </div>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {canPrintPackingLabels(user.role) && data.items.length > 0 && (
-            <PrintPackingLabelsButton
-              className="btn btn-ghost"
-              data-tour="pm-print"
-            />
-          )}
-          {canEdit && (
-            <button
-              className="btn btn-ghost text-[color:var(--danger)]"
-              onClick={async () => {
-                if (!confirm('Delete this order?')) return;
-                const res = await fetch(`/api/orders/${id}`, {
-                  method: 'DELETE',
-                });
-                if (res.ok) router.push('/orders');
-              }}
-            >
-              Delete order
-            </button>
-          )}
-        </div>
-      </header>
+        </header>
 
-      <div data-tour="progress">
-        <ProgressCard progress={data.progress} status={data.order.status} />
-      </div>
-
-      {user.role === 'pm' ? (
-        <PmView
-          order={data.order}
-          items={data.items}
-          products={projectItems}
-          productByKey={productByKey}
-          refresh={refresh}
-          canEdit={canEdit}
-        />
-      ) : user.role === 'installer' &&
-        !isAssignedInstaller &&
-        (data.order.status === 'active' || data.order.status === 'anomaly') ? (
-        <div className="card border-[color:var(--warning)] bg-amber-50 p-6 text-sm dark:bg-amber-950/30">
-          <p className="font-semibold text-[color:var(--text)]">
-            Another installer is assigned to this project
-          </p>
-          <p className="mt-2 text-[color:var(--text-muted)]">
-            Ask your PM to assign you on the project page, or verify using the
-            printed QR code on the box (phone camera — no login required).
-          </p>
+        <div data-tour="progress">
+          <ProgressCard progress={data.progress} status={data.order.status} />
         </div>
-      ) : user.role === 'installer' && isAssignedInstaller ? (
-        <>
-          {data.order.status === 'fulfilled' && (
-            <OrderResolvedCard total={data.items.length} />
-          )}
-          {canScan ? (
-            <InstallerView
-              orderId={data.order.id}
-              items={data.items}
-              productByKey={productByKey}
-              refresh={refresh}
-              applyScanToCache={applyScanToCache}
-            />
-          ) : data.order.status !== 'fulfilled' ? (
-            <ReadOnlyItems items={data.items} productByKey={productByKey} />
-          ) : null}
-        </>
-      ) : (
-        <ReadOnlyItems items={data.items} productByKey={productByKey} />
-      )}
+
+        {user.role === 'pm' ? (
+          <PmView
+            order={data.order}
+            items={data.items}
+            products={projectItems}
+            productByKey={productByKey}
+            refresh={refresh}
+            canEdit={canEdit}
+          />
+        ) : user.role === 'installer' &&
+          !isAssignedInstaller &&
+          (data.order.status === 'active' ||
+            data.order.status === 'anomaly') ? (
+          <div className="card border-[color:var(--warning)] bg-amber-50 p-6 text-sm dark:bg-amber-950/30">
+            <p className="font-semibold text-[color:var(--text)]">
+              Another installer is assigned to this project
+            </p>
+            <p className="mt-2 text-[color:var(--text-muted)]">
+              Only the assigned receiver can verify and fulfill this order. Ask
+              your PM to assign you on the project page.
+            </p>
+          </div>
+        ) : user.role === 'installer' && isAssignedInstaller ? (
+          <>
+            {data.order.status === 'fulfilled' && (
+              <OrderResolvedCard total={data.items.length} />
+            )}
+            {canScan ? (
+              <InstallerView
+                orderId={data.order.id}
+                items={data.items}
+                productByKey={productByKey}
+                refresh={refresh}
+                applyScanToCache={applyScanToCache}
+              />
+            ) : data.order.status !== 'fulfilled' ? (
+              <ReadOnlyItems items={data.items} productByKey={productByKey} />
+            ) : null}
+          </>
+        ) : (
+          <ReadOnlyItems items={data.items} productByKey={productByKey} />
+        )}
       </div>
       {canPrintPackingLabels(user.role) && (
         <PackingLabelPrintSheet
@@ -425,15 +423,15 @@ function PmView({
     <div className="space-y-6">
       {canEdit && (
         <section className="card no-print p-6" data-tour="pm-add-item">
-          <h2 className="text-base font-semibold">
+          {/* <h2 className="text-base font-semibold">
             Adjust items on this order
           </h2>
           <p className="mt-1 text-xs text-[color:var(--text-muted)]">
             Add lines for the same SKU multiple times (e.g. 10 boxes) — each
             gets its own barcode. Remove lines you are not shipping until the
             first scan.
-          </p>
-          <form
+          </p> */}
+          {/* <form
             onSubmit={addItem}
             className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap"
           >
@@ -476,7 +474,7 @@ function PmView({
             >
               {busy ? 'Adding…' : 'Add lines'}
             </button>
-          </form>
+          </form> */}
           {products.length === 0 && (
             <p className="mt-3 text-xs text-[color:var(--warning)]">
               This project has no items yet.{' '}
@@ -1225,7 +1223,6 @@ function ItemsGrid({
     </section>
   );
 }
-
 
 function ItemCard({
   item,

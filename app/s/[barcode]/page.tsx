@@ -2,14 +2,12 @@ import Link from 'next/link';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { getCurrentUser, type AuthenticatedActor } from '@/lib/auth-guard';
-import { getPrintedScanActor } from '@/lib/printed-scan-actor';
 import { verifyPrintedScanToken } from '@/lib/printed-scan-token';
 import { runPageWithObservability } from '@/lib/observability/instrument';
 import { findLogisticsGateOrderId } from '@/lib/logistics-gate-order';
 import { executeLogisticsScan } from '@/lib/logistics-scan-execute';
 import { executeScan } from '@/lib/scan-execute';
 import {
-  findOrderByBarcode,
   findDeliveryLineForSku,
   findRowsByBarcode,
   resolveOnSiteScanTarget,
@@ -26,21 +24,17 @@ export const dynamic = 'force-dynamic';
  *   https://<app>/s/<barcode>?st=<signed-token>
  * on each order item.
  *
- * Two ways the request gets authorised:
+ * There is NO anonymous scanning. Every scan needs an iron-session
+ * cookie; anyone without one is bounced to /login and returned here.
+ * The `?st=` sticker token is a proof of physical-sticker authenticity
+ * (signed against SESSION_SECRET, bound to this exact barcode) — it is
+ * validated when present but never authorises a scan by itself.
  *
- *  A. **Printed-sticker token** (the zero-friction path used by 3rd-party
- *     phone scanners like QR Bot). `?st=…` is signed against this server's
- *     `SESSION_SECRET` and bound to the exact `barcode` in the URL path.
- *     A valid token resolves the scan as a synthetic "Printed sticker"
- *     actor — the installer never sees a login screen.
- *
- *  B. **Iron-session cookie** (the in-app path, also used as a fallback
- *     when the token is missing/expired). If neither is present, we
- *     bounce to `/login?redirect=…` so the installer signs in once and
- *     comes right back.
- *
- * Either way the same transactional `executeScan` runs, decrementing
- * stock and writing the audit row.
+ * Role rules, strictly enforced:
+ *   - Warehouse verification (project pending logistics): logistics only.
+ *   - Delivery fulfillment (project active): the assigned receiver only.
+ *   - PM: never verifies, never fulfills.
+ *   - Super-admin: may override either step.
  */
 export default async function ScanDeepLinkPage({
   params,
@@ -65,85 +59,35 @@ async function scanDeepLinkInner(
   const tokenRaw = Array.isArray(sp.st) ? sp.st[0] : sp.st;
   const token = typeof tokenRaw === 'string' ? tokenRaw.trim() : '';
 
-  // Resolve the scanning actor. The printed-sticker token is treated as
-  // primary: if it verifies against this exact barcode, the sticker
-  // itself authorises the scan (that's the whole point of the token —
-  // a 3rd-party phone scanner like QR Bot opens the URL in a browser
-  // that has no session and the scan must still go through).
-  //
-  // We only fall back to the iron-session cookie when no token was
-  // supplied at all, which preserves the original "installer signed
-  // in, opening /s/<barcode> directly" path.
-  let actor: AuthenticatedActor | null = null;
-  if (token) {
-    const verified = verifyPrintedScanToken(token, barcode);
-    if (verified.ok) {
-      actor = getPrintedScanActor();
-    }
+  // There is no anonymous scanning in this flow. The sticker token only
+  // proves the physical sticker is genuine — it never authorises a scan
+  // by itself. Every scan is performed by a logged-in session, and the
+  // role decides what is allowed: verification is logistics-only,
+  // fulfillment is receiver-only (super-admin can override either).
+  const tokenValid = token
+    ? verifyPrintedScanToken(token, barcode).ok
+    : false;
+  const sessionActor = await getCurrentUser();
+
+  if (!sessionActor) {
+    const path = `/s/${encodeURIComponent(barcode)}`;
+    const to = token ? `${path}?st=${encodeURIComponent(token)}` : path;
+    redirect(`/login?redirect=${encodeURIComponent(to)}`);
   }
 
-  if (!actor) {
-    const sessionActor = await getCurrentUser();
-    if (sessionActor?.role === 'logistics') {
-      const early = await findOrderByBarcode(barcode);
-      if (early) {
-        redirect(
-          `/projects/${early.projectId}/logistics-scan?scan=${encodeURIComponent(barcode)}`,
-        );
-      }
-    }
-    if (sessionActor && sessionActor.role === 'installer') {
-      actor = sessionActor;
-    } else if (sessionActor && sessionActor.role === 'pm') {
-      return (
-        <OutcomeShell
-          status="blocked"
-          title="On-site scans are receiver-only"
-          body="Project Manager accounts cannot verify deliveries. Ask your PM to assign a receiver for this route, or scan with the printed QR as the receiver."
-        />
-      );
-    } else if (sessionActor && sessionActor.role === 'super_admin') {
-      const early = await findOrderByBarcode(barcode);
-      if (early?.projectApprovalStatus === 'pending_logistics') {
-        redirect(
-          `/projects/${early.projectId}/logistics-scan?scan=${encodeURIComponent(barcode)}`,
-        );
-      }
-      return (
-        <OutcomeShell
-          status="blocked"
-          title="Use the right workflow"
-          body="Super admins approve projects in Pending approval (SA). For warehouse scans while a project awaits logistics, open Awaiting logistics → Warehouse scan. Receivers verify on site after activation."
-        />
-      );
-    } else if (sessionActor) {
-      return (
-        <OutcomeShell
-          status="blocked"
-          title="Wrong account for this scan"
-          body="This QR is for warehouse verification (logistics) or on-site delivery verification (receiver). Open Awaiting logistics for warehouse scans."
-        />
-      );
-    } else {
-      // Anonymous + no valid token → bounce to login, preserving the
-      // (possibly invalid) token so the user lands back here once they
-      // sign in.
-      const path = `/s/${encodeURIComponent(barcode)}`;
-      const to = token ? `${path}?st=${encodeURIComponent(token)}` : path;
-      redirect(`/login?redirect=${encodeURIComponent(to)}`);
-    }
+  // A sticker token that fails verification means the QR is forged,
+  // tampered with, or expired — refuse regardless of role.
+  if (token && !tokenValid) {
+    return (
+      <OutcomeShell
+        status="blocked"
+        title="Sticker could not be authenticated"
+        body="This QR carries an invalid or expired sticker token. Reprint the label from the project's print-barcodes page, or scan the barcode from inside the app."
+      />
+    );
   }
 
-  // The deep link was opened by a 3rd-party phone scanner (QR Bot etc.)
-  // when the actor is the synthetic Printed-sticker actor. Those phones
-  // typically have no session, so dropping them onto `/orders/{id}` —
-  // either via the "Open order" button, the Dashboard link, or the
-  // auto-redirect — would bounce them to /login and ruin the
-  // zero-friction promise. We hide the navigation row entirely for the
-  // token path and only keep the outcome card + a "you can close this
-  // tab" hint.
-  const isAnonymousPhoneScan = actor.isPrintedScan === true;
-  const hideNavigation = isAnonymousPhoneScan;
+  const hideNavigation = false;
 
   const target = await resolveOnSiteScanTarget(barcode);
   if (!target) {
@@ -178,11 +122,36 @@ async function scanDeepLinkInner(
     );
   }
 
-  const orderHref = isAnonymousPhoneScan
-    ? undefined
-    : `/orders/${target.orderId}`;
+  const orderHref = `/orders/${target.orderId}`;
 
   if (target.projectApprovalStatus === 'pending_logistics') {
+    // Warehouse verification stage — logistics only (super-admin can
+    // override). PMs and receivers are told to wait; nobody scans
+    // anonymously.
+    if (
+      sessionActor.role !== 'logistics' &&
+      sessionActor.role !== 'super_admin'
+    ) {
+      return (
+        <OutcomeShell
+          status="blocked"
+          title="Warehouse verification is logistics-only"
+          body="Logistics is still verifying this shipment in the warehouse. PMs never verify or fulfill; receivers verify on site only after logistics approves the project and the PM creates a delivery order."
+        />
+      );
+    }
+
+    // Deep-link execution requires the signed sticker token — proof the
+    // physical sticker on the box is genuine. Without one, logistics
+    // verifies through the in-app warehouse scanner instead.
+    if (!tokenValid) {
+      redirect(
+        `/projects/${target.projectId}/logistics-scan?scan=${encodeURIComponent(barcode)}`,
+      );
+    }
+
+    const actor: AuthenticatedActor = sessionActor;
+
     const gateOrderId = await findLogisticsGateOrderId(target.projectId);
     if (!gateOrderId) {
       return (
@@ -246,10 +215,34 @@ async function scanDeepLinkInner(
     );
   }
 
+  // Delivery fulfillment — strictly the receiver's job (super-admin can
+  // override). Logistics is told the item is already verified; PMs are
+  // blocked outright.
+  if (sessionActor.role === 'logistics') {
+    return (
+      <OutcomeShell
+        status="blocked"
+        title="Already verified in the warehouse"
+        body={`This item on "${target.projectName}" has already been verified — your warehouse step is done. Only the receiver can fulfill the delivery order; logistics never fulfills. Hand the box to the assigned receiver.`}
+        orderHref={orderHref}
+      />
+    );
+  }
+  if (sessionActor.role === 'pm') {
+    return (
+      <OutcomeShell
+        status="blocked"
+        title="On-site scans are receiver-only"
+        body="Project Manager accounts cannot verify deliveries. Only the receiver assigned to this project can fulfill the order."
+        orderHref={orderHref}
+      />
+    );
+  }
+
   const result = await executeScan({
     orderId: target.orderId,
     barcode: target.itemBarcode,
-    actor,
+    actor: sessionActor,
   });
 
   if (result.kind === 'order_not_found') {
@@ -311,7 +304,7 @@ async function scanDeepLinkInner(
       <OutcomeShell
         status="blocked"
         title="Not the assigned receiver"
-        body="This project is locked to a different receiver for in-app scans. Use the printed QR on the box, or ask your PM to assign this route to you."
+        body="This project is locked to a different receiver. Only the assigned receiver can fulfill this order — ask your PM to assign this route to you."
         orderHref={orderHref}
         hideNavigation={hideNavigation}
       />

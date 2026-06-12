@@ -3,6 +3,13 @@ export type PendingCategoryAdd = {
   quantity: number;
 };
 
+export type PendingCategoryRename = {
+  categoryId: string;
+  /** Old name at queue time — display only. */
+  fromName?: string;
+  name: string;
+};
+
 export type PendingItemChange = {
   itemId: string;
   name?: string;
@@ -21,6 +28,7 @@ export type ProjectPendingPatch = {
   siteLongitude?: number;
   geofenceRadiusMeters?: number;
   categoryAdds?: PendingCategoryAdd[];
+  categoryRenames?: PendingCategoryRename[];
   itemChanges?: PendingItemChange[];
 };
 
@@ -91,6 +99,17 @@ export function mergeProjectPendingPatch(
   if (incoming.categoryAdds?.length) {
     base.categoryAdds = [...(base.categoryAdds ?? []), ...incoming.categoryAdds];
   }
+  for (const rename of incoming.categoryRenames ?? []) {
+    const list = [...(base.categoryRenames ?? [])];
+    const idx = list.findIndex((r) => r.categoryId === rename.categoryId);
+    if (idx >= 0) {
+      // Keep the original fromName so the summary shows the live name.
+      list[idx] = { ...rename, fromName: list[idx]!.fromName ?? rename.fromName };
+    } else {
+      list.push(rename);
+    }
+    base.categoryRenames = list;
+  }
 
   let next = base as ProjectPendingPatch;
   for (const ch of incoming.itemChanges ?? []) {
@@ -110,6 +129,7 @@ export function pendingPatchHasWork(patch: ProjectPendingPatch | null): boolean 
     patch.siteLongitude !== undefined ||
     patch.geofenceRadiusMeters !== undefined ||
     (patch.categoryAdds?.length ?? 0) > 0 ||
+    (patch.categoryRenames?.length ?? 0) > 0 ||
     (patch.itemChanges?.length ?? 0) > 0
   );
 }
@@ -135,6 +155,15 @@ export function formatPendingPatchSummary(patch: unknown): string[] {
   if (p.categoryAdds?.length) {
     for (const c of p.categoryAdds) {
       lines.push(`Add category “${c.name}” × ${c.quantity} units`);
+    }
+  }
+  if (p.categoryRenames?.length) {
+    for (const c of p.categoryRenames) {
+      lines.push(
+        c.fromName
+          ? `Rename category “${c.fromName}” → “${c.name}”`
+          : `Rename category → “${c.name}”`,
+      );
     }
   }
   for (const c of p.itemChanges ?? []) {
