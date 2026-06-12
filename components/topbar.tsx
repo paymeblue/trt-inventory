@@ -3,6 +3,7 @@
 import { useSession } from './session-context';
 import { UserMenu } from './user-menu';
 import { NetworkIndicator } from './network-indicator';
+import { NotificationBell } from './notification-bell';
 
 export function Topbar() {
   const { user, logout } = useSession();
@@ -21,6 +22,7 @@ export function Topbar() {
       {user ? (
         <div className="flex items-center gap-3">
           <NetworkIndicator />
+          <NotificationBell />
           <UserMenu user={user} onSignOut={() => void logout()} />
         </div>
       ) : null}

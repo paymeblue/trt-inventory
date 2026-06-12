@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import useSWR from "@/lib/swr";
 import { StatusPill } from "@/components/status-pill";
 import { useAuthedUser } from "@/components/session-context";
@@ -44,15 +45,14 @@ const FILTERS: { label: string; value: FilterValue }[] = [
  */
 export default function OrdersPage() {
   const user = useAuthedUser();
+  const searchParams = useSearchParams();
   const { data, isLoading, error } = useSWR<OrdersResponse>("/api/orders");
-  const [filter, setFilter] = useState<FilterValue>("all");
+  const initialFilter = (searchParams?.get("filter") as FilterValue | null) ?? "all";
+  const [filter, setFilter] = useState<FilterValue>(initialFilter);
   const [query, setQuery] = useState("");
-  // Default mode depends on role. Rendered on client so no SSR/DOM issue.
   const defaultView: ViewMode = user?.role === "installer" ? "cards" : "table";
   const [view, setView] = useState<ViewMode>(defaultView);
   useEffect(() => {
-    // If the user's role is resolved after the initial render, snap to
-    // that role's default view exactly once.
     setView(defaultView);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.role]);

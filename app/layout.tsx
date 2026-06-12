@@ -7,6 +7,7 @@ import { themeBootstrapScript } from "@/lib/theme";
 import { SessionProvider } from "@/components/session-context";
 import { ThemeProvider } from "@/components/theme-context";
 import { QueryProvider } from "@/app/providers";
+import { NotificationProvider } from "@/components/notification-context";
 import { Sidebar } from "@/components/sidebar";
 import { Topbar } from "@/components/topbar";
 
@@ -47,19 +48,21 @@ export default async function RootLayout({
         <ThemeProvider>
           <QueryProvider>
             <SessionProvider initialUser={user}>
-              {user ? (
-                <div className="flex min-h-screen">
-                  <Sidebar />
-                  <div className="flex flex-1 flex-col">
-                    <Topbar />
-                    <main className="flex-1 px-6 py-6 md:px-10 md:py-8">
-                      {children}
-                    </main>
+              <NotificationProvider>
+                {user ? (
+                  <div className="flex min-h-screen">
+                    <Sidebar />
+                    <div className="flex flex-1 flex-col">
+                      <Topbar />
+                      <main className="flex-1 px-6 py-6 md:px-10 md:py-8">
+                        {children}
+                      </main>
+                    </div>
                   </div>
-                </div>
-              ) : (
-                children
-              )}
+                ) : (
+                  children
+                )}
+              </NotificationProvider>
             </SessionProvider>
           </QueryProvider>
         </ThemeProvider>

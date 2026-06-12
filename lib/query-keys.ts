@@ -1,5 +1,6 @@
 /** Shared React Query keys — invalidate prefixes so all related views refresh. */
 export const queryKeys = {
+  notifications: ['notifications'] as const,
   projects: ["projects"] as const,
   orders: ["orders"] as const,
   projectDetail: (id: string) => ["project-detail", id] as const,

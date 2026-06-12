@@ -32,7 +32,10 @@ const bodySchema = z.object({
     "logistics_apply_patch",
     "logistics_reject_metadata_change",
     "discard_pending_patch",
+    "pm_resubmit",
   ]),
+  /** Required when action is super_admin_reject */
+  reason: z.string().min(1).max(1000).optional(),
 });
 
 function effectivePendingPatch(raw: unknown): ProjectPendingPatch | null {
@@ -85,6 +88,7 @@ export async function POST(
           .set({
             approvalStatus: "pending_logistics",
             projectBarcode: barcode,
+            rejectionReason: null,
             updatedAt: new Date(),
           })
           .where(eq(projects.id, id))
@@ -109,10 +113,14 @@ export async function POST(
       if (project.approvalStatus !== "pending_super_admin") {
         return jsonError(400, "Project is not waiting for super-admin approval");
       }
+      if (!body.reason?.trim()) {
+        return jsonError(400, "A rejection reason is required so the PM can act on it.");
+      }
       const [updated] = await db
         .update(projects)
         .set({
           approvalStatus: "rejected_super_admin",
+          rejectionReason: body.reason.trim(),
           updatedAt: new Date(),
         })
         .where(eq(projects.id, id))
@@ -373,6 +381,24 @@ export async function POST(
           pendingPatch: null,
           pendingDeleteRequested: false,
           metadataChangeStage: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(projects.id, id))
+        .returning();
+      return NextResponse.json({ project: updated });
+    }
+
+    if (body.action === "pm_resubmit") {
+      const auth = await requireUserAny(["pm", "super_admin"]);
+      if ("error" in auth) return auth.error;
+      if (project.approvalStatus !== "rejected_super_admin") {
+        return jsonError(400, "Only rejected projects can be resubmitted.");
+      }
+      const [updated] = await db
+        .update(projects)
+        .set({
+          approvalStatus: "pending_super_admin",
+          rejectionReason: null,
           updatedAt: new Date(),
         })
         .where(eq(projects.id, id))

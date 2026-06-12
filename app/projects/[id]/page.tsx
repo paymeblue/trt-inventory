@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useCallback, type ReactNode } from "react";
+import { fetchJson } from "@/lib/fetch-json";
 import useSWR from "@/lib/swr";
 import {
   formatSkuSequence,
@@ -70,6 +71,7 @@ interface Project {
   siteAddress: string | null;
   siteLatitude: number | null;
   siteLongitude: number | null;
+  rejectionReason: string | null;
   geofenceRadiusMeters: number;
 }
 
@@ -90,71 +92,137 @@ interface ProjectDetailResponse {
 function ProjectApprovalBanners({
   project,
   viewerRole,
+  onProjectUpdated,
 }: {
   project: Project;
   viewerRole: Role;
+  onProjectUpdated?: () => void;
 }) {
+  const [resubmitBusy, setResubmitBusy] = useState(false);
+  const [resubmitError, setResubmitError] = useState<string | null>(null);
+
+  const handleResubmit = useCallback(async () => {
+    setResubmitBusy(true);
+    setResubmitError(null);
+    try {
+      await fetchJson(`/api/projects/${project.id}/approval`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "pm_resubmit" }),
+      });
+      onProjectUpdated?.();
+    } catch (err) {
+      setResubmitError((err as Error).message);
+    } finally {
+      setResubmitBusy(false);
+    }
+  }, [project.id, onProjectUpdated]);
+
   const patchLines = formatPendingPatchSummary(project.pendingPatch);
   const hasQueuedPatch = patchLines.length > 0 || project.pendingDeleteRequested;
 
-  const statusCopy: Partial<
-    Record<ProjectApprovalStatus, { title: string; body: string }>
-  > = {
-    pending_super_admin: {
-      title: "Waiting for super-admin approval",
-      body: "Installers cannot see this project until a super-admin approves it and logistics activates it.",
-    },
-    pending_logistics: {
-      title: "Approved — print the barcodes",
-      body: "Super-admin approved this project. Print the packing barcodes, paste one on each physical box, and hand the boxes to logistics. Logistics must scan every sticker before approving the project for orders.",
-    },
-    rejected_super_admin: {
-      title: "Rejected by super-admin",
-      body: "This project was not approved. Contact your supervisor if this is unexpected.",
-    },
-    rejected_logistics: {
-      title: "Rejected by logistics",
-      body: "Logistics could not fulfill this project as requested.",
-    },
-  };
-
   const blocks: ReactNode[] = [];
 
-  if (
-    project.approvalStatus !== "active" &&
-    statusCopy[project.approvalStatus]
-  ) {
-    const m = statusCopy[project.approvalStatus]!;
-    blocks.push(
-      <div
-        key="status"
-        className="card border-amber-200 bg-amber-50/90 p-4 dark:border-amber-900/60 dark:bg-amber-950/40"
-      >
-        <div className="text-sm font-semibold text-amber-950 dark:text-amber-100">
-          {m.title}
-        </div>
-        <p className="mt-1 text-xs text-[color:var(--text)]">{m.body}</p>
-        {(viewerRole === "pm" || viewerRole === "super_admin") &&
-          project.approvalStatus === "pending_logistics" && (
-            <Link
-              href={`/projects/${project.id}/print-barcodes`}
-              className="btn btn-primary mt-3 inline-flex"
-            >
-              Print barcodes
-            </Link>
-          )}
-        {viewerRole === "logistics" &&
-          project.approvalStatus === "pending_logistics" &&
-          project.projectBarcode && (
-            <p className="mt-2 font-mono text-sm text-[color:var(--text)]">
-              <span className="font-sans text-xs font-semibold text-[color:var(--text-muted)]">
-                Project barcode:{" "}
-              </span>
-              {project.projectBarcode}
+  if (project.approvalStatus !== "active") {
+    if (project.approvalStatus === "rejected_super_admin") {
+      blocks.push(
+        <div
+          key="status"
+          className="card border-[color:var(--danger)] bg-red-50/80 p-4 dark:bg-red-950/30"
+        >
+          <div className="text-sm font-semibold text-[color:var(--danger)]">
+            Rejected by super-admin
+          </div>
+          {project.rejectionReason ? (
+            <div className="mt-2 rounded-md border border-[color:var(--danger)]/30 bg-white/60 px-3 py-2 dark:bg-black/20">
+              <p className="text-xs font-semibold text-[color:var(--text-muted)] uppercase tracking-wide mb-1">
+                Reason
+              </p>
+              <p className="text-sm text-[color:var(--text)]">
+                {project.rejectionReason}
+              </p>
+            </div>
+          ) : (
+            <p className="mt-1 text-xs text-[color:var(--text)]">
+              This project was not approved. Address the issues and resubmit for review.
             </p>
           )}
-      </div>,
-    );
+          {(viewerRole === "pm" || viewerRole === "super_admin") && (
+            <div className="mt-3 flex items-center gap-2">
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={resubmitBusy}
+                onClick={handleResubmit}
+              >
+                {resubmitBusy ? "Resubmitting…" : "Resubmit for review"}
+              </button>
+              {resubmitError && (
+                <p className="text-xs text-[color:var(--danger)]">{resubmitError}</p>
+              )}
+            </div>
+          )}
+        </div>,
+      );
+    } else if (project.approvalStatus === "rejected_logistics") {
+      blocks.push(
+        <div
+          key="status"
+          className="card border-[color:var(--danger)] bg-red-50/80 p-4 dark:bg-red-950/30"
+        >
+          <div className="text-sm font-semibold text-[color:var(--danger)]">
+            Rejected by logistics
+          </div>
+          <p className="mt-1 text-xs text-[color:var(--text)]">
+            Logistics could not fulfill this project as requested.
+          </p>
+        </div>,
+      );
+    } else {
+      const statusCopy: Partial<Record<ProjectApprovalStatus, { title: string; body: string }>> = {
+        pending_super_admin: {
+          title: "Waiting for super-admin approval",
+          body: "Installers cannot see this project until a super-admin approves it and logistics activates it.",
+        },
+        pending_logistics: {
+          title: "Approved — print the barcodes",
+          body: "Super-admin approved this project. Print the packing barcodes, paste one on each physical box, and hand the boxes to logistics. Logistics must scan every sticker before approving the project for orders.",
+        },
+      };
+      const m = statusCopy[project.approvalStatus];
+      if (m) {
+        blocks.push(
+          <div
+            key="status"
+            className="card border-amber-200 bg-amber-50/90 p-4 dark:border-amber-900/60 dark:bg-amber-950/40"
+          >
+            <div className="text-sm font-semibold text-amber-950 dark:text-amber-100">
+              {m.title}
+            </div>
+            <p className="mt-1 text-xs text-[color:var(--text)]">{m.body}</p>
+            {(viewerRole === "pm" || viewerRole === "super_admin") &&
+              project.approvalStatus === "pending_logistics" && (
+                <Link
+                  href={`/projects/${project.id}/print-barcodes`}
+                  className="btn btn-primary mt-3 inline-flex"
+                >
+                  Print barcodes
+                </Link>
+              )}
+            {viewerRole === "logistics" &&
+              project.approvalStatus === "pending_logistics" &&
+              project.projectBarcode && (
+                <p className="mt-2 font-mono text-sm text-[color:var(--text)]">
+                  <span className="font-sans text-xs font-semibold text-[color:var(--text-muted)]">
+                    Project barcode:{" "}
+                  </span>
+                  {project.projectBarcode}
+                </p>
+              )}
+          </div>,
+        );
+      }
+    }
   }
 
   if (
@@ -364,7 +432,7 @@ export default function ProjectDetailPage() {
         )}
       </div>
 
-      <ProjectApprovalBanners project={project} viewerRole={user.role} />
+      <ProjectApprovalBanners project={project} viewerRole={user.role} onProjectUpdated={mutate} />
 
       {canManage && (
         <>

@@ -83,12 +83,15 @@ export default function SuperAdminApprovalsPage() {
 
   const totalPackingLines = previewRows.reduce((s, r) => s + r.lines, 0);
 
+  const [rejectTargetId, setRejectTargetId] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+
   const act = useMutation({
-    mutationFn: async (vars: { id: string; action: string }) =>
+    mutationFn: async (vars: { id: string; action: string; reason?: string }) =>
       fetchJson<{ project: { id: string } }>(`/api/projects/${vars.id}/approval`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: vars.action }),
+        body: JSON.stringify({ action: vars.action, reason: vars.reason }),
       }),
     onSuccess: async (_data, vars) => {
       if (vars.action === "super_admin_approve") {
@@ -97,16 +100,19 @@ export default function SuperAdminApprovalsPage() {
           `${name} approved. Print the barcodes and hand the boxes to logistics.`,
           { label: "Print barcodes", href: `/projects/${vars.id}/print-barcodes` },
         );
+      } else if (vars.action === "super_admin_reject") {
+        showToast("Project rejected — the PM has been informed of the reason.", "info");
+        setRejectTargetId(null);
+        setRejectReason("");
       }
       await invalidateAllApprovalSurface(qc);
       setApproveTargetId(null);
     },
     onError: (err) => {
-      // Never leave the super-admin staring at a stuck modal: close it
-      // and say exactly what failed.
       setApproveTargetId(null);
+      setRejectTargetId(null);
       showToast(
-        err instanceof Error ? err.message : "Approval failed — try again.",
+        err instanceof Error ? err.message : "Action failed — try again.",
         "error",
       );
     },
@@ -237,9 +243,7 @@ export default function SuperAdminApprovalsPage() {
                   type="button"
                   className="btn btn-danger btn-sm"
                   disabled={act.isPending}
-                  onClick={() =>
-                    act.mutate({ id: p.id, action: "super_admin_reject" })
-                  }
+                  onClick={() => { setRejectTargetId(p.id); setRejectReason(""); }}
                 >
                   Reject
                 </button>
@@ -344,6 +348,65 @@ export default function SuperAdminApprovalsPage() {
           </ul>
         )}
       </section>
+
+      {rejectTargetId && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          role="presentation"
+          onClick={(e) => { if (e.target === e.currentTarget) { setRejectTargetId(null); setRejectReason(""); } }}
+        >
+          <div
+            role="dialog"
+            aria-modal
+            aria-labelledby="reject-heading"
+            className="card w-full max-w-md p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="reject-heading" className="text-lg font-semibold text-[color:var(--danger)]">
+              Reject project
+            </h2>
+            <p className="mt-1 text-sm text-[color:var(--text-muted)]">
+              Provide a clear reason so the PM knows exactly what to fix before resubmitting.
+            </p>
+            <label className="mt-4 block">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">
+                Rejection reason <span className="text-[color:var(--danger)]">*</span>
+              </span>
+              <textarea
+                className="input min-h-[100px] w-full"
+                placeholder="e.g. Missing site address, item quantities are incorrect, installer not assigned…"
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                maxLength={1000}
+                autoFocus
+              />
+              <p className="mt-1 text-right text-xs text-[color:var(--text-muted)]">
+                {rejectReason.length}/1000
+              </p>
+            </label>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={act.isPending}
+                onClick={() => { setRejectTargetId(null); setRejectReason(""); }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                disabled={act.isPending || !rejectReason.trim()}
+                onClick={() =>
+                  act.mutate({ id: rejectTargetId, action: "super_admin_reject", reason: rejectReason.trim() })
+                }
+              >
+                {act.isPending ? "Rejecting…" : "Confirm rejection"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {approveTargetId && (
         <div

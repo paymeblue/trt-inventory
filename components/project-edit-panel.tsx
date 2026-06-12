@@ -1,15 +1,12 @@
-"use client";
+'use client';
 
-import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
-import {
-  AddressPicker,
-  type SiteSelection,
-} from "@/components/address-picker";
-import { invalidateWorkspaceBadges } from "@/lib/query-keys";
-import type { ProjectApprovalStatus } from "@/db/schema";
-import { projectLivesOnSite } from "@/lib/project-live";
-import { effectiveProjectFields } from "@/lib/project-pending-patch";
+import { useQueryClient } from '@tanstack/react-query';
+import { useEffect, useMemo, useState } from 'react';
+import { AddressPicker, type SiteSelection } from '@/components/address-picker';
+import { invalidateWorkspaceBadges } from '@/lib/query-keys';
+import type { ProjectApprovalStatus } from '@/db/schema';
+import { projectLivesOnSite } from '@/lib/project-live';
+import { effectiveProjectFields } from '@/lib/project-pending-patch';
 
 type ProjectRow = {
   id: string;
@@ -32,13 +29,10 @@ export function ProjectEditPanel({
 }) {
   const qc = useQueryClient();
   const livesOnSite = projectLivesOnSite(project.approvalStatus);
-  const effective = useMemo(
-    () => effectiveProjectFields(project),
-    [project],
-  );
+  const effective = useMemo(() => effectiveProjectFields(project), [project]);
 
   const [name, setName] = useState(effective.name);
-  const [description, setDescription] = useState(effective.description ?? "");
+  const [description, setDescription] = useState(effective.description ?? '');
   const [site, setSite] = useState<SiteSelection | null>(
     effective.siteLatitude != null &&
       effective.siteLongitude != null &&
@@ -57,7 +51,7 @@ export function ProjectEditPanel({
   useEffect(() => {
     const next = effectiveProjectFields(project);
     setName(next.name);
-    setDescription(next.description ?? "");
+    setDescription(next.description ?? '');
     setSite(
       next.siteLatitude != null &&
         next.siteLongitude != null &&
@@ -73,10 +67,10 @@ export function ProjectEditPanel({
 
   const hasChanges = useMemo(() => {
     const descTrim = description.trim();
-    const prevDesc = (effective.description ?? "").trim();
+    const prevDesc = (effective.description ?? '').trim();
     const siteChanged =
       !!site &&
-      (site.siteAddress !== (effective.siteAddress ?? "") ||
+      (site.siteAddress !== (effective.siteAddress ?? '') ||
         site.siteLatitude !== effective.siteLatitude ||
         site.siteLongitude !== effective.siteLongitude);
     const siteCleared =
@@ -95,7 +89,7 @@ export function ProjectEditPanel({
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (!hasChanges) {
-      setErr("Change the title, description, or site before saving.");
+      setErr('Change the title, description, or site before saving.');
       return;
     }
     setBusy(true);
@@ -105,13 +99,13 @@ export function ProjectEditPanel({
       const payload: Record<string, unknown> = {};
       if (name.trim() !== effective.name) payload.name = name.trim();
       const descTrim = description.trim();
-      const prevDesc = (effective.description ?? "").trim();
+      const prevDesc = (effective.description ?? '').trim();
       if (descTrim !== prevDesc) {
         payload.description = descTrim.length ? descTrim : null;
       }
       const siteChanged =
         site &&
-        (site.siteAddress !== (effective.siteAddress ?? "") ||
+        (site.siteAddress !== (effective.siteAddress ?? '') ||
           site.siteLatitude !== effective.siteLatitude ||
           site.siteLongitude !== effective.siteLongitude);
       if (siteChanged && site) {
@@ -121,15 +115,15 @@ export function ProjectEditPanel({
       }
 
       const res = await fetch(`/api/projects/${project.id}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
         body: JSON.stringify(payload),
       });
       const json = (await res.json().catch(() => ({}))) as {
         error?: string;
         queuedForApproval?: boolean;
       };
-      if (!res.ok) throw new Error(json.error ?? "Update failed");
+      if (!res.ok) throw new Error(json.error ?? 'Update failed');
       if (json.queuedForApproval) setQueued(true);
       await onChanged();
       await invalidateWorkspaceBadges(qc);
@@ -145,8 +139,8 @@ export function ProjectEditPanel({
       <h2 className="text-base font-semibold">Project details</h2>
       <p className="mt-1 text-xs text-[color:var(--text-muted)]">
         {livesOnSite
-          ? "Edits to the title, description, or site address are sent to super-admin, then logistics, before they go live."
-          : "You can update details while this project is still in the approval pipeline."}
+          ? 'Edits to the title, description, or site address are sent to super-admin, then logistics, before they go live.'
+          : 'You can update details while this project is still in the approval pipeline.'}
       </p>
       <form onSubmit={save} className="mt-4 space-y-4">
         <label className="block">
@@ -173,14 +167,14 @@ export function ProjectEditPanel({
             onChange={(e) => setDescription(e.target.value)}
           />
         </label>
-        <AddressPicker value={site} onChange={setSite} required={false} />
+        {/* <AddressPicker value={site} onChange={setSite} required={false} /> */}
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="submit"
             className="btn btn-primary"
             disabled={busy || !hasChanges}
           >
-            {busy ? "Saving…" : livesOnSite ? "Submit for approval" : "Save"}
+            {busy ? 'Saving…' : livesOnSite ? 'Submit for approval' : 'Save'}
           </button>
         </div>
         {queued ? (
@@ -188,7 +182,9 @@ export function ProjectEditPanel({
             Submitted for super-admin approval.
           </p>
         ) : null}
-        {err ? <p className="text-xs text-[color:var(--danger)]">{err}</p> : null}
+        {err ? (
+          <p className="text-xs text-[color:var(--danger)]">{err}</p>
+        ) : null}
       </form>
     </section>
   );

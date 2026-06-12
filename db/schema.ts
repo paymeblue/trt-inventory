@@ -149,6 +149,8 @@ export const projects = pgTable(
     geofenceRadiusMeters: integer("geofence_radius_meters")
       .notNull()
       .default(500),
+    /** Set by super-admin when rejecting; cleared on next resubmission. */
+    rejectionReason: text("rejection_reason"),
   },
   (t) => [uniqueIndex("projects_name_unique").on(t.name)],
 );
