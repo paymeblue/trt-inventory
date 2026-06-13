@@ -139,14 +139,9 @@ export function Sidebar() {
 
   return (
     <aside className="sticky top-0 hidden h-[100dvh] w-64 shrink-0 flex-col overflow-hidden border-r border-[color:var(--border)] bg-[color:var(--surface)] md:flex">
-      <div className="flex h-16 shrink-0 items-center gap-3 border-b border-[color:var(--border)] px-6">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[color:var(--primary)] text-sm font-bold text-[color:var(--primary-foreground)]">
-          T
-        </div>
-        <div className="leading-tight">
-          <div className="text-sm font-semibold">TRT Inventory</div>
-          <div className="text-xs text-[color:var(--text-muted)]">OMVS</div>
-        </div>
+      <div className="flex h-16 shrink-0 items-center border-b border-[color:var(--border)] bg-[#0f2540] px-6">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/trt-logo.png" alt="TRT Arredo" className="h-9 w-auto object-contain" />
       </div>
 
       <nav

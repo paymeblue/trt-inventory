@@ -29,16 +29,11 @@ export async function GET() {
 
     const payload = rows
       .filter((o) => {
-        const pendingGate =
-          Boolean(o.isLogisticsGate) &&
-          o.project?.approvalStatus === "pending_logistics";
-        if (pendingGate && auth.actor.role !== "logistics") {
-          return false;
-        }
+        // Gate orders are managed through the dedicated logistics-scan page,
+        // never through the main orders list regardless of role or project status.
+        if (o.isLogisticsGate) return false;
         if (auth.actor.role === "installer") {
-          return (
-            o.project?.approvalStatus === "active" && !o.isLogisticsGate
-          );
+          return o.project?.approvalStatus === "active";
         }
         return true;
       })

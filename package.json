@@ -30,6 +30,7 @@
     "clsx": "^2.1.1",
     "docx": "^9.6.1",
     "drizzle-orm": "^0.45.2",
+    "exceljs": "^4.4.0",
     "iron-session": "^8.0.4",
     "jsbarcode": "^3.12.3",
     "next": "16.2.4",

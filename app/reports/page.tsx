@@ -1,19 +1,84 @@
-"use client";
+'use client';
 
-import { useMemo, useState } from "react";
-import useSWR from "@/lib/swr";
-import { useAuthedUser } from "@/components/session-context";
-import { PageLoading } from "@/components/page-loading";
-import type { ReportRow } from "@/app/api/reports/route";
+import { useEffect, useRef, useState, useMemo } from 'react';
+import useSWR from '@/lib/swr';
+import { useAuthedUser } from '@/components/session-context';
+import { PageLoading } from '@/components/page-loading';
+import type { ReportRow } from '@/app/api/reports/route';
 
 interface ReportsResponse {
   rows: ReportRow[];
 }
 
+const FORMATS = [
+  { label: 'Download as PDF', format: 'pdf' },
+  { label: 'Download as Excel', format: 'xlsx' },
+  { label: 'Download as Word', format: 'docx' },
+  { label: 'Download as CSV', format: 'csv' },
+];
+
+function DownloadDropdown({ orderId }: { orderId: string }) {
+  const [open, setOpen] = useState(false);
+  const [dropPos, setDropPos] = useState({ top: 0, right: 0 });
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  function handleToggle() {
+    if (btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      setDropPos({
+        top: r.bottom + window.scrollY + 4,
+        right: window.innerWidth - r.right,
+      });
+    }
+    setOpen((v) => !v);
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    function close(e: MouseEvent) {
+      if (!btnRef.current?.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [open]);
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        className="btn btn-ghost text-xs"
+        onClick={handleToggle}
+      >
+        Download ▾
+      </button>
+
+      {open && (
+        <div
+          style={{ position: 'fixed', top: dropPos.top, right: dropPos.right, zIndex: 9999 }}
+          className="min-w-[170px] overflow-hidden rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)] shadow-xl"
+        >
+          {FORMATS.map(({ label, format }) => (
+            <a
+              key={format}
+              href={`/api/reports/download?format=${format}&orderId=${orderId}`}
+              download
+              onClick={() => setOpen(false)}
+              className="block px-4 py-2.5 text-xs hover:bg-[color:var(--surface-muted)] cursor-pointer"
+            >
+              {label}
+            </a>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
 export default function ReportsPage() {
   const user = useAuthedUser();
-  const { data, isLoading, error } = useSWR<ReportsResponse>("/api/reports");
-  const [query, setQuery] = useState("");
+  const { data, isLoading, error } = useSWR<ReportsResponse>('/api/reports');
+  const [query, setQuery] = useState('');
 
   const rows = data?.rows ?? [];
 
@@ -22,7 +87,9 @@ export default function ReportsPage() {
       rows.filter((r) =>
         query.trim()
           ? r.projectName.toLowerCase().includes(query.trim().toLowerCase()) ||
-            (r.installerName ?? "").toLowerCase().includes(query.trim().toLowerCase())
+            (r.installerName ?? '')
+              .toLowerCase()
+              .includes(query.trim().toLowerCase())
           : true,
       ),
     [rows, query],
@@ -30,7 +97,7 @@ export default function ReportsPage() {
 
   if (!user) return null;
 
-  if (user.role === "installer") {
+  if (user.role === 'installer') {
     return (
       <div className="card p-6">
         <h1 className="text-lg font-semibold">Reports</h1>
@@ -47,18 +114,9 @@ export default function ReportsPage() {
         <div>
           <h1 className="text-2xl font-semibold">Reports</h1>
           <p className="text-sm text-[color:var(--text-muted)]">
-            All fulfilled orders — searchable and downloadable as CSV.
+            All fulfilled orders. Download each as PDF, Excel, Word, or CSV.
           </p>
         </div>
-        {rows.length > 0 && (
-          <button
-            type="button"
-            className="btn btn-primary self-start"
-            onClick={() => downloadCsv(filtered)}
-          >
-            Download CSV
-          </button>
-        )}
       </div>
 
       <div>
@@ -81,12 +139,12 @@ export default function ReportsPage() {
       ) : filtered.length === 0 ? (
         <div className="card p-10 text-center text-sm text-[color:var(--text-muted)]">
           {rows.length === 0
-            ? "No fulfilled orders yet. Completed orders will appear here."
-            : "No orders match this search."}
+            ? 'No fulfilled orders yet. Completed orders will appear here.'
+            : 'No orders match this search.'}
         </div>
       ) : (
-        <div className="card overflow-hidden">
-          <div className="overflow-x-auto">
+        <div className="card">
+          <div className="overflow-x-auto overflow-y-visible rounded-[inherit]">
             <table className="w-full text-sm">
               <thead className="bg-[color:var(--surface-muted)] text-xs uppercase tracking-wide text-[color:var(--text-muted)]">
                 <tr>
@@ -95,18 +153,23 @@ export default function ReportsPage() {
                   <th className="px-5 py-3 text-left">Receiver / Installer</th>
                   <th className="px-5 py-3 text-left">Fulfilled</th>
                   <th className="px-5 py-3 text-left">Items</th>
-                  <th className="px-5 py-3 text-right">
-                    <span className="sr-only">Actions</span>
-                  </th>
+                  <th className="px-5 py-3 text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[color:var(--border)]">
                 {filtered.map((r) => (
-                  <tr key={r.orderId} className="hover:bg-[color:var(--surface-muted)]">
+                  <tr
+                    key={r.orderId}
+                    className="hover:bg-[color:var(--surface-muted)]"
+                  >
                     <td className="px-5 py-3 font-medium">{r.projectName}</td>
-                    <td className="px-5 py-3 text-[color:var(--text-muted)]">{r.pmName}</td>
                     <td className="px-5 py-3 text-[color:var(--text-muted)]">
-                      {r.installerName ?? <span className="italic opacity-50">Unassigned</span>}
+                      {r.pmName}
+                    </td>
+                    <td className="px-5 py-3 text-[color:var(--text-muted)]">
+                      {r.installerName ?? (
+                        <span className="italic opacity-50">Unassigned</span>
+                      )}
                     </td>
                     <td className="px-5 py-3 text-[color:var(--text-muted)]">
                       {new Date(r.fulfilledAt).toLocaleString()}
@@ -117,12 +180,7 @@ export default function ReportsPage() {
                       </span>
                     </td>
                     <td className="px-5 py-3 text-right">
-                      <a
-                        href={`/orders/${r.orderId}`}
-                        className="text-xs font-semibold text-[color:var(--primary)] hover:underline"
-                      >
-                        View order →
-                      </a>
+                      <DownloadDropdown orderId={r.orderId} />
                     </td>
                   </tr>
                 ))}
@@ -130,51 +188,10 @@ export default function ReportsPage() {
             </table>
           </div>
           <div className="border-t border-[color:var(--border)] px-5 py-3 text-xs text-[color:var(--text-muted)]">
-            {filtered.length} fulfilled order{filtered.length === 1 ? "" : "s"}
+            {filtered.length} fulfilled order{filtered.length === 1 ? '' : 's'}
           </div>
         </div>
       )}
     </div>
   );
-}
-
-function downloadCsv(rows: ReportRow[]) {
-  const headers = [
-    "Order ID",
-    "Project",
-    "Created by (PM)",
-    "Receiver / Installer",
-    "Fulfilled Date",
-    "Item Count",
-    "Item SKUs",
-    "Barcodes",
-  ];
-  const escape = (v: string) =>
-    v.includes(",") || v.includes('"') || v.includes("\n")
-      ? `"${v.replace(/"/g, '""')}"`
-      : v;
-  const csvLines = [
-    headers.join(","),
-    ...rows.map((r) =>
-      [
-        escape(r.orderId),
-        escape(r.projectName),
-        escape(r.pmName),
-        escape(r.installerName ?? ""),
-        escape(new Date(r.fulfilledAt).toLocaleString()),
-        String(r.itemCount),
-        escape(r.items.map((i) => i.sku).join("; ")),
-        escape(r.items.map((i) => i.barcode).join("; ")),
-      ].join(","),
-    ),
-  ];
-  const blob = new Blob([csvLines.join("\n")], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `fulfilled-orders-${new Date().toISOString().slice(0, 10)}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
 }

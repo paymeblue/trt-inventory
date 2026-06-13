@@ -1,16 +1,16 @@
-"use client";
+'use client';
 
-import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useState } from 'react';
 
 export default function LoginPage() {
   const router = useRouter();
   const search = useSearchParams();
-  const redirectTo = search.get("redirect") ?? "/";
+  const redirectTo = search.get('redirect') ?? '/';
 
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -19,13 +19,13 @@ export default function LoginPage() {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Login failed");
+      if (!res.ok) throw new Error(json.error ?? 'Login failed');
       router.push(redirectTo);
       router.refresh();
     } catch (err) {
@@ -37,15 +37,10 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-[color:var(--background)] px-4">
       <div className="w-full max-w-sm">
-        <div className="mb-8 flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[color:var(--primary)] text-[color:var(--primary-foreground)] text-base font-bold">
-            T
-          </div>
-          <div className="leading-tight">
-            <div className="text-base font-semibold">TRT Inventory</div>
-            <div className="text-xs text-[color:var(--text-muted)]">
-              Order Management & Verification
-            </div>
+        <div className="mb-8 flex justify-center">
+          <div className="rounded-xl bg-[#0f2540] px-8 py-5">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/trt-logo.png" alt="TRT Arredo" className="h-12 w-auto" />
           </div>
         </div>
 
@@ -99,7 +94,7 @@ export default function LoginPage() {
             className="btn btn-primary w-full"
             disabled={busy || !email || !password}
           >
-            {busy ? "Signing in…" : "Sign in"}
+            {busy ? 'Signing in…' : 'Sign in'}
           </button>
 
           <div className="text-center text-xs text-[color:var(--text-muted)]">

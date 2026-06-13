@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { desc, isNull, sql } from "drizzle-orm";
+import { desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { orderItems, orders, products, projects } from "@/db/schema";
 import { requireUser } from "@/lib/auth-guard";
@@ -16,14 +16,18 @@ export async function GET() {
         fulfilled: sql<number>`count(*) filter (where status = 'fulfilled')::int`,
         anomaly: sql<number>`count(*) filter (where status = 'anomaly')::int`,
       })
-      .from(orders);
+      .from(orders)
+      .where(eq(orders.isLogisticsGate, false));
 
+    // Exclude gate order items — they track warehouse logistics scan, not on-site delivery
     const [itemCounts] = await db
       .select({
         totalItems: sql<number>`count(*)::int`,
-        scannedItems: sql<number>`count(*) filter (where scanned_at is not null)::int`,
+        scannedItems: sql<number>`count(*) filter (where ${orderItems.scannedAt} is not null)::int`,
       })
-      .from(orderItems);
+      .from(orderItems)
+      .innerJoin(orders, eq(orderItems.orderId, orders.id))
+      .where(eq(orders.isLogisticsGate, false));
 
     const [inventory] = await db
       .select({
@@ -64,11 +68,24 @@ export async function GET() {
             .filter((o) => !o.isLogisticsGate)
             .slice(0, 5);
 
+    // Most recent active delivery order for the verification progress widget
+    const activeOrderRow = recentRows.find(
+      (o) => !o.isLogisticsGate && o.status === "active",
+    ) ?? null;
+    const activeOrder = activeOrderRow
+      ? {
+          projectName: activeOrderRow.project?.name ?? "Unknown",
+          total: activeOrderRow.items.length,
+          scanned: activeOrderRow.items.filter((i) => i.scannedAt !== null).length,
+        }
+      : null;
+
     return NextResponse.json({
       orders: orderCounts,
       items: itemCounts,
       inventory,
       projects: projectCounts,
+      activeOrder,
       logisticsProjects:
         auth.actor.role === "logistics"
           ? {
