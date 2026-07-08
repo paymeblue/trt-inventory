@@ -21,6 +21,8 @@ import { canPrintPackingLabels } from '@/lib/packing-label-access';
 import { PACKING_LABEL } from '@/lib/packing-label-spec';
 import { StatusPill } from '@/components/status-pill';
 import { ScanInput } from '@/components/scan-input';
+import { ReceiveScanner } from '@/components/receive-scanner';
+import { PhysicalReceiveScanner } from '@/components/physical-receive-scanner';
 import { PageLoading } from '@/components/page-loading';
 import { QrCodeLoader } from '@/components/qr-code-loader';
 import { Tour, type TourStep } from '@/components/tour';
@@ -754,11 +756,30 @@ function InstallerView({
           {allDone && <OrderResolvedCard total={items.length} />}
 
           {!allDone && (
-            <div data-tour="scan-box">
+            <div data-tour="scan-box" className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <ReceiveScanner
+                  onScan={onScan}
+                  busy={pendingScans > 0}
+                  allDone={allDone}
+                  remaining={pending.length}
+                  total={items.length}
+                  flash={flash}
+                />
+                <PhysicalReceiveScanner
+                  onScan={onScan}
+                  busy={pendingScans > 0}
+                  allDone={allDone}
+                  remaining={pending.length}
+                  total={items.length}
+                  flash={flash}
+                />
+              </div>
               <ScanInput
                 onScan={onScan}
                 disabled={allDone}
                 busy={pendingScans > 0}
+                lastResult={flash}
               />
             </div>
           )}

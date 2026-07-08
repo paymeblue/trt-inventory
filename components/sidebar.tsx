@@ -207,14 +207,17 @@ export function Sidebar() {
           </Link>
         )}
 
-        {/* Orders dropdown */}
-        <OrdersDropdown
-          pathname={pathname}
-          open={ordersOpen}
-          onToggle={() => setOrdersOpen((o) => !o)}
-          canCreateOrder={canCreateOrder}
-          underOrders={underOrders}
-        />
+        {/* Orders dropdown — logistics never creates or fulfills orders,
+            only verifies in the warehouse queue, so it's hidden for them. */}
+        {user.role !== "logistics" && (
+          <OrdersDropdown
+            pathname={pathname}
+            open={ordersOpen}
+            onToggle={() => setOrdersOpen((o) => !o)}
+            canCreateOrder={canCreateOrder}
+            underOrders={underOrders}
+          />
+        )}
 
         {/* Reports */}
         {canSeeReports && (

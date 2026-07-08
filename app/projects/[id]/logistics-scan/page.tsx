@@ -13,6 +13,7 @@ import {
   queryKeys,
 } from '@/lib/query-keys';
 import { normalizeScanBarcode } from '@/lib/scan-deep-link';
+import type { ScanFeedbackKind } from '@/lib/scan-feedback';
 import { ScanInput } from '@/components/scan-input';
 import { useAuthedUser } from '@/components/session-context';
 import { ResourceLoadError } from '@/components/resource-load-error';
@@ -81,6 +82,10 @@ export default function ProjectLogisticsScanPage({
   const user = useAuthedUser();
   const { showToast } = useToast();
   const [flash, setFlash] = useState<string | null>(null);
+  const [lastResult, setLastResult] = useState<{
+    kind: ScanFeedbackKind;
+    at: number;
+  } | null>(null);
   const deepLinkScanDone = useRef(false);
 
   const canWarehouseScan =
@@ -160,10 +165,12 @@ export default function ProjectLogisticsScanPage({
             lastScanned: barcode,
           }),
         );
+        setLastResult({ kind: res.outcome.result, at: Date.now() });
       } catch (e) {
         setFlash(
           e instanceof Error ? e.message : 'Warehouse scan failed — try again.',
         );
+        setLastResult({ kind: 'invalid', at: Date.now() });
       }
     },
     [scanMut, gateQuery.data],
@@ -298,6 +305,7 @@ export default function ProjectLogisticsScanPage({
             <ScanInput
               busy={scanMut.isPending}
               onScan={(b) => void onManualScan(b)}
+              lastResult={lastResult}
             />
 
             {(flash ?? scanMut.isError) && (

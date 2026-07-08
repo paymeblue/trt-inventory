@@ -1,36 +1,50 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { BrowserMultiFormatReader } from "@zxing/browser";
-import type { IScannerControls } from "@zxing/browser";
 
 import { normalizeScanBarcode } from "@/lib/scan-deep-link";
 import { QrCodeLoader } from "@/components/qr-code-loader";
+import { useContinuousScanner } from "@/lib/use-continuous-scanner";
+import { useHardwareScanner } from "@/lib/use-hardware-scanner";
+import {
+  playScanFeedback,
+  primeScanFeedbackAudio,
+  type ScanFeedbackKind,
+} from "@/lib/scan-feedback";
 
 interface ScanInputProps {
   onScan: (value: string) => void;
   disabled?: boolean;
   /** True while a scan request is in flight (fetch + refresh). */
   busy?: boolean;
+  /**
+   * Outcome of the most recent scan, used to play a beep/vibrate cue and
+   * flash a result color in the hands-free modes (camera / physical
+   * scanner). Optional — omit if the caller doesn't track outcomes.
+   */
+  lastResult?: { kind: ScanFeedbackKind; at: number } | null;
 }
 
 /**
- * Dual-mode scanner UI: camera-based (ZXing) or manual text entry / hardware
- * barcode scanner (which behaves like a keyboard). Manual mode is always
- * enabled so the app is usable without camera permissions.
+ * Triple-mode scanner UI: camera-based (ZXing), a physical USB/Bluetooth
+ * "keyboard wedge" barcode scanner (e.g. Sunlux XL361OS), or manual text
+ * entry. Manual mode is always enabled so the app is usable without camera
+ * permissions or hardware.
  */
-export function ScanInput({ onScan, disabled, busy = false }: ScanInputProps) {
-  const [mode, setMode] = useState<"manual" | "camera">("manual");
+export function ScanInput({
+  onScan,
+  disabled,
+  busy = false,
+  lastResult = null,
+}: ScanInputProps) {
+  const [mode, setMode] = useState<"manual" | "camera" | "physical">(
+    "manual",
+  );
   const [value, setValue] = useState("");
-  const [cameraError, setCameraError] = useState<string | null>(null);
-  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
-  const [deviceId, setDeviceId] = useState<string | null>(null);
-
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const controlsRef = useRef<IScannerControls | null>(null);
-  const lastScanRef = useRef<{ value: string; at: number } | null>(null);
   const busyRef = useRef(busy);
-  busyRef.current = busy;
+  useEffect(() => {
+    busyRef.current = busy;
+  }, [busy]);
 
   /**
    * Unifies what to do with a decoded payload regardless of source.
@@ -47,65 +61,62 @@ export function ScanInput({ onScan, disabled, busy = false }: ScanInputProps) {
    * version without having to restart the camera stream on every render.
    */
   const payloadRef = useRef<(raw: string) => void>(() => undefined);
-  payloadRef.current = (raw: string) => {
-    if (disabled || busyRef.current) return;
-    const barcode = normalizeScanBarcode(raw);
-    if (!barcode) return;
-    onScan(barcode);
-  };
-
   useEffect(() => {
-    if (mode !== "camera") return;
-
-    let cancelled = false;
-    const reader = new BrowserMultiFormatReader();
-
-    (async () => {
-      try {
-        const devs = await BrowserMultiFormatReader.listVideoInputDevices();
-        if (cancelled) return;
-        setDevices(devs);
-        const chosen = deviceId ?? devs[0]?.deviceId ?? null;
-        setDeviceId(chosen);
-
-        if (!chosen) {
-          setCameraError("No camera found on this device.");
-          return;
-        }
-
-        const controls = await reader.decodeFromVideoDevice(
-          chosen,
-          videoRef.current!,
-          (result) => {
-            if (!result) return;
-            const text = result.getText();
-            const now = Date.now();
-            // debounce duplicate reads within 1.5s
-            if (
-              lastScanRef.current &&
-              lastScanRef.current.value === text &&
-              now - lastScanRef.current.at < 1500
-            ) {
-              return;
-            }
-            lastScanRef.current = { value: text, at: now };
-            payloadRef.current(text);
-          },
-        );
-        controlsRef.current = controls;
-      } catch (err) {
-        if (!cancelled) {
-          setCameraError((err as Error).message || "Camera access failed.");
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      controlsRef.current?.stop();
-      controlsRef.current = null;
+    payloadRef.current = (raw: string) => {
+      if (disabled || busyRef.current) return;
+      const barcode = normalizeScanBarcode(raw);
+      if (!barcode) return;
+      onScan(barcode);
     };
-  }, [mode, deviceId]);
+  }, [disabled, onScan]);
+
+  const {
+    videoRef,
+    devices,
+    deviceId,
+    setDeviceId,
+    error: cameraError,
+  } = useContinuousScanner({
+    active: mode === "camera",
+    onDecode: (text) => payloadRef.current(text),
+  });
+
+  useHardwareScanner({
+    active: mode === "physical",
+    onScan: (code) => payloadRef.current(code),
+  });
+
+  const lastFeedbackAtRef = useRef(0);
+  useEffect(() => {
+    if (
+      mode === "manual" ||
+      !lastResult ||
+      lastResult.at === lastFeedbackAtRef.current
+    ) {
+      return;
+    }
+    lastFeedbackAtRef.current = lastResult.at;
+    playScanFeedback(lastResult.kind);
+  }, [mode, lastResult]);
+
+  const [physicalFlash, setPhysicalFlash] = useState<{
+    kind: ScanFeedbackKind;
+    at: number;
+  } | null>(null);
+  const lastPhysicalFlashAtRef = useRef(0);
+  useEffect(() => {
+    if (
+      mode !== "physical" ||
+      !lastResult ||
+      lastResult.at === lastPhysicalFlashAtRef.current
+    ) {
+      return;
+    }
+    lastPhysicalFlashAtRef.current = lastResult.at;
+    setPhysicalFlash(lastResult);
+    const t = setTimeout(() => setPhysicalFlash(null), 900);
+    return () => clearTimeout(t);
+  }, [mode, lastResult]);
 
   const blocked = disabled || busy;
 
@@ -128,7 +139,7 @@ export function ScanInput({ onScan, disabled, busy = false }: ScanInputProps) {
         <div>
           <div className="text-sm font-semibold">Verify item</div>
           <div className="text-[11px] text-[color:var(--text-muted)]">
-            Scan the barcode or QR with a camera, or type/paste it.
+            Scan with a camera, a physical barcode scanner, or type/paste it.
           </div>
         </div>
         <div
@@ -163,6 +174,23 @@ export function ScanInput({ onScan, disabled, busy = false }: ScanInputProps) {
             }`}
           >
             Camera
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "physical"}
+            onClick={() => {
+              primeScanFeedbackAudio();
+              setMode("physical");
+            }}
+            disabled={blocked}
+            className={`rounded-full px-3 py-1 transition-colors disabled:opacity-50 ${
+              mode === "physical"
+                ? "bg-[color:var(--primary)] text-[color:var(--primary-foreground)]"
+                : "text-[color:var(--text-muted)]"
+            }`}
+          >
+            Physical scanner
           </button>
         </div>
       </div>
@@ -202,7 +230,7 @@ export function ScanInput({ onScan, disabled, busy = false }: ScanInputProps) {
               )}
             </button>
           </form>
-        ) : (
+        ) : mode === "camera" ? (
           <div className="space-y-3">
             <div className="relative aspect-video w-full overflow-hidden rounded-lg bg-black">
               <video
@@ -247,6 +275,59 @@ export function ScanInput({ onScan, disabled, busy = false }: ScanInputProps) {
             <p className="text-xs text-[color:var(--text-muted)]">
               Point the camera at the barcode. Results are debounced so holding
               the code in view won&apos;t double-count.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div
+              className={`relative flex aspect-video w-full flex-col items-center justify-center gap-3 overflow-hidden rounded-lg border-2 border-dashed transition-colors ${
+                physicalFlash
+                  ? physicalFlash.kind === "valid"
+                    ? "border-[color:var(--success)] bg-[color:var(--success)]/10"
+                    : physicalFlash.kind === "duplicate"
+                      ? "border-[color:var(--warning)] bg-[color:var(--warning)]/10"
+                      : "border-[color:var(--danger)] bg-[color:var(--danger)]/10"
+                  : "border-[color:var(--border)] bg-[color:var(--surface-muted)]"
+              }`}
+              role="status"
+              aria-live="polite"
+            >
+              <div
+                className={`flex h-16 w-16 items-center justify-center rounded-full text-2xl font-bold text-white ${
+                  physicalFlash
+                    ? physicalFlash.kind === "valid"
+                      ? "bg-[color:var(--success)]"
+                      : physicalFlash.kind === "duplicate"
+                        ? "bg-[color:var(--warning)]"
+                        : "bg-[color:var(--danger)]"
+                    : "bg-[color:var(--primary)]"
+                }`}
+                aria-hidden
+              >
+                {physicalFlash
+                  ? physicalFlash.kind === "valid"
+                    ? "✓"
+                    : physicalFlash.kind === "duplicate"
+                      ? "↺"
+                      : "!"
+                  : "»"}
+              </div>
+              <div className="text-sm font-semibold">
+                {busy
+                  ? "Recording…"
+                  : blocked
+                    ? "Not ready"
+                    : "Ready — scan the next item"}
+              </div>
+              <p className="max-w-xs text-center text-xs text-[color:var(--text-muted)]">
+                Point the physical scanner at each barcode and pull the
+                trigger. No need to click anything between scans.
+              </p>
+            </div>
+            <p className="text-xs text-[color:var(--text-muted)]">
+              Works with any USB or Bluetooth barcode scanner set to keyboard
+              mode (e.g. Sunlux XL361OS) — it types the code and presses
+              Enter, just like typing it in yourself.
             </p>
           </div>
         )}
