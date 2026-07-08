@@ -213,6 +213,7 @@ export async function POST(
         const needsWarehouseScans = lines.length > 0;
         if (
           needsWarehouseScans &&
+          auth.actor.role !== "super_admin" &&
           lines.some(
             (item) =>
               item.logisticsScannedAt === null ||

@@ -164,7 +164,7 @@ export default function LogisticsApprovalsPage() {
                     href={`/projects/${p.id}/logistics-scan`}
                     className="btn btn-primary btn-sm"
                   >
-                    Approve Project
+                    Inspect & Approve Project
                   </Link>
                   <button
                     type="button"

@@ -41,19 +41,27 @@ export function useContinuousScanner({
 
     (async () => {
       try {
-        const devs = await BrowserMultiFormatReader.listVideoInputDevices();
-        if (cancelled) return;
-        setDevices(devs);
-        const chosen = deviceId ?? devs[0]?.deviceId ?? null;
-        setDeviceId(chosen);
-
+        // iOS Safari (and some other mobile browsers) refuse to enumerate
+        // devices — returning an empty list with no error — until camera
+        // permission has already been granted once. Enumerating first is
+        // only a best-effort attempt to pre-select a device; if it comes
+        // back empty we still proceed and let decodeFromVideoDevice's
+        // built-in `facingMode: "environment"` fallback request the
+        // camera directly, which is what actually triggers the OS
+        // permission prompt.
+        let chosen = deviceId;
         if (!chosen) {
-          setError("No camera found on this device.");
-          return;
+          try {
+            const devs = await BrowserMultiFormatReader.listVideoInputDevices();
+            if (!cancelled) setDevices(devs);
+            chosen = devs[0]?.deviceId ?? null;
+          } catch {
+            // Ignored — fall through to the facingMode fallback below.
+          }
         }
 
         const controls = await reader.decodeFromVideoDevice(
-          chosen,
+          chosen ?? undefined,
           videoRef.current!,
           (result) => {
             if (!result) return;
@@ -70,10 +78,33 @@ export function useContinuousScanner({
             onDecodeRef.current(text);
           },
         );
+        if (cancelled) {
+          controls.stop();
+          return;
+        }
         controlsRef.current = controls;
+        if (chosen) setDeviceId(chosen);
+
+        // Permission is granted now, so device labels/ids are reliably
+        // available — refresh the list to populate the camera picker.
+        try {
+          const devs = await BrowserMultiFormatReader.listVideoInputDevices();
+          if (!cancelled) setDevices(devs);
+        } catch {
+          // Non-fatal — the picker just won't offer alternate cameras.
+        }
       } catch (err) {
         if (!cancelled) {
-          setError((err as Error).message || "Camera access failed.");
+          const name = (err as { name?: string } | undefined)?.name;
+          const message =
+            name === "NotAllowedError"
+              ? "Camera permission was denied. Enable camera access for this site in your browser settings and try again."
+              : name === "NotFoundError"
+                ? "No camera found on this device."
+                : name === "NotReadableError"
+                  ? "The camera is already in use by another app. Close it and try again."
+                  : (err as Error).message || "Camera access failed.";
+          setError(message);
         }
       }
     })();

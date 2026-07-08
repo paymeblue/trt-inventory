@@ -1,14 +1,14 @@
-"use client";
+'use client';
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from 'react';
 
-import { normalizeScanBarcode } from "@/lib/scan-deep-link";
-import { useHardwareScanner } from "@/lib/use-hardware-scanner";
-import { primeScanFeedbackAudio } from "@/lib/scan-feedback";
+import { normalizeScanBarcode } from '@/lib/scan-deep-link';
+import { useHardwareScanner } from '@/lib/use-hardware-scanner';
+import { primeScanFeedbackAudio } from '@/lib/scan-feedback';
 import {
   ScanSessionOverlay,
   type ScanSessionFlash,
-} from "@/components/scan-session-overlay";
+} from '@/components/scan-session-overlay';
 
 interface PhysicalReceiveScannerProps {
   onScan: (barcode: string) => void;
@@ -102,15 +102,15 @@ export function PhysicalReceiveScanner({
       >
         <div className="flex h-full w-full flex-col items-center justify-center gap-4 px-6 text-white">
           <div className="flex h-20 w-20 items-center justify-center rounded-full bg-white/10 text-3xl">
-            »
+            |||||||||||
           </div>
           <div className="text-center">
             <div className="text-base font-semibold">
               Ready — scan the next item
             </div>
             <p className="mt-1 max-w-xs text-center text-xs text-white/70">
-              Point the scanner at each barcode and pull the trigger. No need
-              to tap anything between scans.
+              Point the scanner at each barcode and pull the trigger. No need to
+              tap anything between scans.
             </p>
           </div>
         </div>

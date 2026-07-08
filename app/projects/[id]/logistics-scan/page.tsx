@@ -15,6 +15,7 @@ import {
 import { normalizeScanBarcode } from '@/lib/scan-deep-link';
 import type { ScanFeedbackKind } from '@/lib/scan-feedback';
 import { ScanInput } from '@/components/scan-input';
+import { ConfirmModal } from '@/components/confirm-modal';
 import { useAuthedUser } from '@/components/session-context';
 import { ResourceLoadError } from '@/components/resource-load-error';
 import { PageLoading } from '@/components/page-loading';
@@ -87,9 +88,11 @@ export default function ProjectLogisticsScanPage({
     at: number;
   } | null>(null);
   const deepLinkScanDone = useRef(false);
+  const [overrideOpen, setOverrideOpen] = useState(false);
 
   const canWarehouseScan =
     user?.role === 'logistics' || user?.role === 'super_admin';
+  const isSuperAdmin = user?.role === 'super_admin';
 
   const gateQuery = useQuery({
     queryKey: queryKeys.logisticsGate(projectId),
@@ -378,15 +381,29 @@ export default function ProjectLogisticsScanPage({
             type="button"
             className="btn btn-primary"
             disabled={
-              fulfillMut.isPending || scanMut.isPending || !logisticsComplete
+              fulfillMut.isPending ||
+              scanMut.isPending ||
+              (!logisticsComplete && !isSuperAdmin)
             }
-            onClick={() => fulfillMut.mutate()}
+            onClick={() => {
+              if (!logisticsComplete && isSuperAdmin) {
+                setOverrideOpen(true);
+                return;
+              }
+              fulfillMut.mutate();
+            }}
           >
-            {fulfillMut.isPending ? 'Approving…' : 'Approve project'}
+            {fulfillMut.isPending
+              ? 'Approving…'
+              : !logisticsComplete && isSuperAdmin
+                ? 'Approve project (override)'
+                : 'Approve project'}
           </button>
           {!logisticsComplete && hasLines ? (
             <span className="self-center text-xs text-[color:var(--text-muted)]">
-              Finish every warehouse scan before approving.
+              {isSuperAdmin
+                ? "Not every box has been scanned yet — approving now overrides warehouse verification."
+                : 'Finish every warehouse scan before approving.'}
             </span>
           ) : null}
         </div>
@@ -398,6 +415,20 @@ export default function ProjectLogisticsScanPage({
           </p>
         )}
       </section>
+
+      <ConfirmModal
+        open={overrideOpen}
+        onOpenChange={setOverrideOpen}
+        title="Approve without finishing warehouse scans?"
+        description="Some packing QR codes on this project haven't been scanned yet. As super-admin you can override and activate it anyway, but any unscanned boxes won't be recorded as verified in the warehouse."
+        confirmLabel="Approve anyway"
+        variant="danger"
+        busy={fulfillMut.isPending}
+        error={
+          fulfillMut.error instanceof Error ? fulfillMut.error.message : null
+        }
+        onConfirm={() => fulfillMut.mutate()}
+      />
       </div>
     </>
   );
