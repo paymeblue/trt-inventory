@@ -60,8 +60,19 @@ export function useContinuousScanner({
           }
         }
 
-        const controls = await reader.decodeFromVideoDevice(
-          chosen ?? undefined,
+        // Build constraints ourselves (rather than delegating to
+        // decodeFromVideoDevice) so we can ask for a high-resolution feed —
+        // the default constraints ZXing builds leave resolution unset,
+        // which on some devices falls back to a low, soft-looking stream.
+        // `ideal` degrades gracefully on cameras that can't hit it.
+        const videoConstraints: MediaTrackConstraints = chosen
+          ? { deviceId: { exact: chosen } }
+          : { facingMode: { ideal: "environment" } };
+        videoConstraints.width = { ideal: 1920 };
+        videoConstraints.height = { ideal: 1920 };
+
+        const controls = await reader.decodeFromConstraints(
+          { video: videoConstraints },
           videoRef.current!,
           (result) => {
             if (!result) return;

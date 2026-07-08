@@ -232,14 +232,14 @@ export function ScanInput({
           </form>
         ) : mode === "camera" ? (
           <div className="space-y-3">
-            <div className="relative aspect-video w-full overflow-hidden rounded-lg bg-black">
+            <div className="relative mx-auto aspect-square w-full max-w-md overflow-hidden rounded-lg bg-black">
               <video
                 ref={videoRef}
-                className="h-full w-full object-cover"
+                className="h-full w-full object-cover [image-rendering:crisp-edges]"
                 muted
                 playsInline
               />
-              <div className="pointer-events-none absolute inset-8 rounded-lg border-2 border-dashed border-white/70" />
+              <div className="pointer-events-none absolute inset-6 rounded-lg border-4 border-dashed border-white/80" />
               {busy && (
                 <div
                   className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/55"
@@ -280,7 +280,7 @@ export function ScanInput({
         ) : (
           <div className="space-y-3">
             <div
-              className={`relative flex aspect-video w-full flex-col items-center justify-center gap-3 overflow-hidden rounded-lg border-2 border-dashed transition-colors ${
+              className={`relative mx-auto flex aspect-square w-full max-w-md flex-col items-center justify-center gap-3 overflow-hidden rounded-lg border-2 border-dashed transition-colors ${
                 physicalFlash
                   ? physicalFlash.kind === "valid"
                     ? "border-[color:var(--success)] bg-[color:var(--success)]/10"
