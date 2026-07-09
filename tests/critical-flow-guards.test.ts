@@ -51,6 +51,61 @@ describe("super-admin override", () => {
     const src = load("app/projects/[id]/logistics-scan/page.tsx");
     expect(src).toContain("user?.role === 'logistics' || user?.role === 'super_admin'");
   });
+
+  it("logistics_fulfill actually lets super-admin skip the unscanned-lines gate — not just access the action", () => {
+    // Regression guard: the route previously required requireUserAny to
+    // include super_admin (asserted above), but the "every line scanned"
+    // check ran unconditionally for every role — so super-admin could open
+    // the action but was still blocked exactly like logistics. The override
+    // only means something if the completeness check itself is skipped.
+    const src = load("app/api/projects/[id]/approval/route.ts");
+    const fulfillStart = src.indexOf('body.action === "logistics_fulfill"');
+    const fulfillBlock = src.slice(
+      fulfillStart,
+      src.indexOf('body.action === "logistics_reject"', fulfillStart),
+    );
+    expect(fulfillBlock).toMatch(
+      /needsWarehouseScans\s*&&\s*auth\.actor\.role !== "super_admin"/,
+    );
+  });
+
+  it("warehouse scan page offers super-admin an override button when scans are incomplete", () => {
+    const src = load("app/projects/[id]/logistics-scan/page.tsx");
+    expect(src).toContain("Approve project (override)");
+    expect(src).toContain("!logisticsComplete && !isSuperAdmin");
+  });
+});
+
+describe("receiver scan options parity", () => {
+  it("order detail page offers both camera and physical-scanner options to the receiver", () => {
+    const src = load("app/orders/[id]/page.tsx");
+    expect(src).toContain("<ReceiveScanner");
+    expect(src).toContain("<PhysicalReceiveScanner");
+    expect(src).toContain("<ScanInput");
+  });
+
+  it("shared ScanInput exposes all three scan modes", () => {
+    const src = load("components/scan-input.tsx");
+    expect(src).toContain("Manual / Keyboard");
+    expect(src).toContain("Camera");
+    expect(src).toContain("Physical scanner");
+  });
+
+  it("logistics warehouse scan page also gets the physical-scanner tab via the shared ScanInput", () => {
+    const src = load("app/projects/[id]/logistics-scan/page.tsx");
+    expect(src).toContain("<ScanInput");
+  });
+});
+
+describe("sidebar navigation by role", () => {
+  it("logistics never sees the Orders dropdown — they only work the warehouse queue", () => {
+    const src = load("components/sidebar.tsx");
+    expect(src).toContain('user.role !== "logistics"');
+    const guardIdx = src.indexOf('user.role !== "logistics"');
+    const dropdownIdx = src.indexOf("<OrdersDropdown");
+    expect(guardIdx).toBeGreaterThan(-1);
+    expect(dropdownIdx).toBeGreaterThan(guardIdx);
+  });
 });
 
 describe("stickers are PM / super-admin only", () => {

@@ -1,6 +1,11 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import {
+  emptyScanBufferState,
+  reduceScanKey,
+  type ScanBufferState,
+} from "@/lib/scan-buffer";
 
 interface UseHardwareScannerOptions {
   /** Listener is attached only while true. */
@@ -28,8 +33,7 @@ export function useHardwareScanner({
   onScan,
   maxKeyIntervalMs = 60,
 }: UseHardwareScannerOptions) {
-  const bufferRef = useRef("");
-  const lastKeyAtRef = useRef(0);
+  const stateRef = useRef<ScanBufferState>(emptyScanBufferState);
   const onScanRef = useRef(onScan);
   useEffect(() => {
     onScanRef.current = onScan;
@@ -39,8 +43,6 @@ export function useHardwareScanner({
     if (!active) return;
 
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
-
       const target = e.target as HTMLElement | null;
       if (
         target &&
@@ -51,28 +53,25 @@ export function useHardwareScanner({
         return;
       }
 
-      const now = Date.now();
-
-      if (e.key === "Enter") {
-        const code = bufferRef.current.trim();
-        bufferRef.current = "";
-        if (code) onScanRef.current(code);
-        return;
-      }
-
-      if (e.key.length !== 1) return;
-
-      if (bufferRef.current && now - lastKeyAtRef.current > maxKeyIntervalMs) {
-        bufferRef.current = "";
-      }
-      lastKeyAtRef.current = now;
-      bufferRef.current += e.key;
+      const { state, scanned } = reduceScanKey(
+        stateRef.current,
+        {
+          key: e.key,
+          now: Date.now(),
+          ctrlKey: e.ctrlKey,
+          metaKey: e.metaKey,
+          altKey: e.altKey,
+        },
+        maxKeyIntervalMs,
+      );
+      stateRef.current = state;
+      if (scanned) onScanRef.current(scanned);
     }
 
     document.addEventListener("keydown", handleKeyDown);
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
-      bufferRef.current = "";
+      stateRef.current = emptyScanBufferState;
     };
   }, [active, maxKeyIntervalMs]);
 }
